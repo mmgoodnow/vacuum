@@ -1,0 +1,13 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.3.0/schema.json",
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true
+		}
+	}
+}
