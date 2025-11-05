@@ -17,6 +17,16 @@ export interface SyncResult {
 	skippedMissingFile: number;
 }
 
+interface LibraryProcessingStats {
+	libraryName: string;
+	libraryId: number;
+	fetched: number;
+	imported: number;
+	skippedUnsupported: number;
+	skippedMissingFile: number;
+	skippedDueToPath: number;
+}
+
 export async function syncMediaUnits(
 	config: AppConfig,
 	options: SyncOptions = {},
@@ -37,6 +47,18 @@ export async function syncMediaUnits(
 	const sources: MediaSource[] = [];
 	let skippedDueToPath = 0;
 	let skippedMissingFile = 0;
+	let skippedUnsupported = 0;
+	const libraryStats: LibraryProcessingStats[] = [];
+
+	if (options.verbose) {
+		console.log(
+			`Configured library roots: ${
+				config.libraryPaths.length
+					? config.libraryPaths.map((root) => `"${root}"`).join(", ")
+					: "none (all paths allowed)"
+			}`,
+		);
+	}
 
 	for (const library of libraries) {
 		if (selectedLibraryIds && !selectedLibraryIds.has(library.section_id)) {
@@ -50,24 +72,39 @@ export async function syncMediaUnits(
 		}
 
 		const items = await client.getLibraryMediaItems(library.section_id);
+		const stats: LibraryProcessingStats = {
+			libraryName: library.section_name,
+			libraryId: library.section_id,
+			fetched: items.length,
+			imported: 0,
+			skippedUnsupported: 0,
+			skippedMissingFile: 0,
+			skippedDueToPath: 0,
+		};
+
 		for (const item of items) {
 			if (!isSupportedMediaType(item.media_type)) {
+				stats.skippedUnsupported += 1;
+				skippedUnsupported += 1;
 				continue;
 			}
 
 			const filePath = item.file;
 			if (!filePath) {
+				stats.skippedMissingFile += 1;
 				skippedMissingFile += 1;
 				continue;
 			}
 
 			if (!isPathAllowed(filePath, config.libraryPaths)) {
+				stats.skippedDueToPath += 1;
 				skippedDueToPath += 1;
 				continue;
 			}
 
 			const fileStats = await safeStat(filePath);
 			if (!fileStats) {
+				stats.skippedMissingFile += 1;
 				skippedMissingFile += 1;
 				continue;
 			}
@@ -79,10 +116,58 @@ export async function syncMediaUnits(
 				fileStats,
 			);
 			sources.push(source);
+			stats.imported += 1;
+		}
+
+		libraryStats.push(stats);
+		if (options.verbose) {
+			console.log(
+				[
+					`Processed library "${stats.libraryName}" (${stats.libraryId})`,
+					`fetched ${stats.fetched}`,
+					`imported ${stats.imported}`,
+					stats.skippedUnsupported
+						? `skipped unsupported: ${stats.skippedUnsupported}`
+						: null,
+					stats.skippedMissingFile
+						? `missing file/metadata: ${stats.skippedMissingFile}`
+						: null,
+					stats.skippedDueToPath
+						? `outside configured paths: ${stats.skippedDueToPath}`
+						: null,
+				]
+					.filter(Boolean)
+					.join(", "),
+			);
 		}
 	}
 
 	const units = aggregateMediaUnits(sources);
+
+	if (options.verbose) {
+		console.log(
+			`Imported ${sources.length} source files into ${units.length} media units.`,
+		);
+		if (skippedUnsupported) {
+			console.log(`Skipped ${skippedUnsupported} items with unsupported types.`);
+		}
+		if (skippedMissingFile) {
+			console.log(
+				`Skipped ${skippedMissingFile} items missing files or unreadable on disk.`,
+			);
+		}
+		if (skippedDueToPath) {
+			console.log(
+				`Skipped ${skippedDueToPath} items outside configured library paths.`,
+			);
+		}
+		if (!sources.length) {
+			console.log(
+				"No source files were accepted. Check that your configured library paths match the media file locations and that the container has those paths mounted.",
+			);
+		}
+	}
+
 	return {
 		units,
 		sources,
