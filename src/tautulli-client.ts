@@ -47,10 +47,12 @@ interface LibraryMediaResponse {
 export class TautulliClient {
 	private readonly baseUrl: string;
 	private readonly apiKey: string;
+	private readonly log: ((message: string) => void) | null;
 
-	constructor(config: TautulliConfig) {
+	constructor(config: TautulliConfig, logger?: (message: string) => void) {
 		this.baseUrl = config.baseUrl.replace(/\/+$/, "");
 		this.apiKey = config.apiKey;
+		this.log = logger ?? null;
 	}
 
 	async getServerInfo(): Promise<Record<string, unknown>> {
@@ -112,6 +114,14 @@ export class TautulliClient {
 			url.searchParams.set(key, String(value));
 		}
 
+		if (this.log) {
+			const safeUrl = new URL(url);
+			safeUrl.searchParams.set("apikey", "***");
+			this.log(
+				`[Tautulli] Request cmd=${cmd} url=${safeUrl.toString()}`,
+			);
+		}
+
 		const response = await fetch(url, {
 			headers: {
 				accept: "application/json",
@@ -130,6 +140,8 @@ export class TautulliClient {
 				`Tautulli error: ${payload.response.message ?? "Unknown error"}`,
 			);
 		}
+
+		this.log?.(`[Tautulli] Response cmd=${cmd} status=success`);
 
 		return payload.response.data;
 	}

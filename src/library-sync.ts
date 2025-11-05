@@ -39,7 +39,10 @@ export async function syncMediaUnits(
 		);
 	}
 
-	const client = new TautulliClient(config.tautulli);
+	const client = new TautulliClient(
+		config.tautulli,
+		options.verbose ? (message) => console.log(message) : undefined,
+	);
 	const libraries = await client.getLibraries();
 	const selectedLibraryIds =
 		options.libraryFilterIds && options.libraryFilterIds.length > 0
