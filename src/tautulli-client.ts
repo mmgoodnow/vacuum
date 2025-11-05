@@ -3,13 +3,21 @@ import type { TautulliConfig } from "./types.ts";
 const API_PATH = "api/v2";
 const DEFAULT_PAGE_SIZE = 500;
 
-interface TautulliResponse<T> {
-	response: {
-		result: "success" | "error";
-		message?: string;
-		data: T;
-	};
+interface TautulliSuccessResponse<T> {
+    result: "success";
+    message?: string;
+    data: T;
 }
+
+interface TautulliErrorResponse {
+    result: "error";
+    message?: string;
+    data?: unknown;
+}
+
+type TautulliResponse<T> =
+    | { response: TautulliSuccessResponse<T> }
+    | { response: TautulliErrorResponse };
 
 export interface TautulliLibrary {
 	section_id: number;
@@ -134,15 +142,36 @@ export class TautulliClient {
 			);
 		}
 
-		const payload = (await response.json()) as TautulliResponse<T>;
-		if (payload.response.result !== "success") {
-			throw new Error(
-				`Tautulli error: ${payload.response.message ?? "Unknown error"}`,
-			);
-		}
+        const payload = (await response.json()) as TautulliResponse<T>;
+        if (payload.response.result !== "success") {
+            this.log?.(
+                `[Tautulli] Response cmd=${cmd} status=error message=${payload.response.message ?? "(none)"}`,
+            );
+            throw new Error(
+                `Tautulli error: ${payload.response.message ?? "Unknown error"}`,
+            );
+        }
 
-		this.log?.(`[Tautulli] Response cmd=${cmd} status=success`);
+        const data = payload.response.data;
+        if (this.log) {
+            const describeData = (value: unknown): string => {
+                if (value === null || value === undefined) {
+                    return String(value);
+                }
+                if (Array.isArray(value)) {
+                    return `array(len=${value.length})`;
+                }
+                if (typeof value === "object") {
+                    return `object(keys=${Object.keys(value).join(",")})`;
+                }
+                return String(value);
+            };
 
-		return payload.response.data;
+            this.log(
+                `[Tautulli] Response cmd=${cmd} status=success data=${describeData(data)}`,
+            );
+        }
+
+        return data;
 	}
 }
