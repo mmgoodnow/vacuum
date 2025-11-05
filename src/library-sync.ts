@@ -67,6 +67,18 @@ export async function syncMediaUnits(
 			console.log(
 				"Tautulli returned no libraries. Verify the API key and permissions.",
 			);
+			try {
+				const info = await client.getServerInfo();
+				console.log(
+					`Tautulli server info: ${JSON.stringify(info, null, 2)}`,
+				);
+			} catch (error) {
+				console.log(
+					`Unable to fetch server info, check connectivity and API key. Error: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+			}
 		} else {
 			console.log(
 				`Discovered ${libraries.length} libraries: ${libraries

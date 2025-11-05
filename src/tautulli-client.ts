@@ -53,6 +53,10 @@ export class TautulliClient {
 		this.apiKey = config.apiKey;
 	}
 
+	async getServerInfo(): Promise<Record<string, unknown>> {
+		return this.request<Record<string, unknown>>("get_server_info");
+	}
+
 	async getLibraries(): Promise<TautulliLibrary[]> {
 		const data = await this.request<{ libraries: TautulliLibrary[] }>(
 			"get_libraries",
