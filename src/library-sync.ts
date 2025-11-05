@@ -25,6 +25,8 @@ interface LibraryProcessingStats {
 	skippedUnsupported: number;
 	skippedMissingFile: number;
 	skippedDueToPath: number;
+	sampleOutsidePaths: string[];
+	sampleMissingFiles: string[];
 }
 
 export async function syncMediaUnits(
@@ -60,8 +62,27 @@ export async function syncMediaUnits(
 		);
 	}
 
+	if (options.verbose) {
+		if (libraries.length === 0) {
+			console.log(
+				"Tautulli returned no libraries. Verify the API key and permissions.",
+			);
+		} else {
+			console.log(
+				`Discovered ${libraries.length} libraries: ${libraries
+					.map((library) => `"${library.section_name}" (#${library.section_id})`)
+					.join(", ")}`,
+			);
+		}
+	}
+
 	for (const library of libraries) {
 		if (selectedLibraryIds && !selectedLibraryIds.has(library.section_id)) {
+			if (options.verbose) {
+				console.log(
+					`Skipping library ${library.section_name} (${library.section_id}) because it is not in the filter list.`,
+				);
+			}
 			continue;
 		}
 
@@ -80,6 +101,8 @@ export async function syncMediaUnits(
 			skippedUnsupported: 0,
 			skippedMissingFile: 0,
 			skippedDueToPath: 0,
+			sampleOutsidePaths: [],
+			sampleMissingFiles: [],
 		};
 
 		for (const item of items) {
@@ -92,12 +115,20 @@ export async function syncMediaUnits(
 			const filePath = item.file;
 			if (!filePath) {
 				stats.skippedMissingFile += 1;
+				if (stats.sampleMissingFiles.length < 3) {
+					stats.sampleMissingFiles.push(
+						`${item.title} (${item.rating_key ?? "unknown key"})`,
+					);
+				}
 				skippedMissingFile += 1;
 				continue;
 			}
 
 			if (!isPathAllowed(filePath, config.libraryPaths)) {
 				stats.skippedDueToPath += 1;
+				if (stats.sampleOutsidePaths.length < 3) {
+					stats.sampleOutsidePaths.push(filePath);
+				}
 				skippedDueToPath += 1;
 				continue;
 			}
@@ -105,6 +136,9 @@ export async function syncMediaUnits(
 			const fileStats = await safeStat(filePath);
 			if (!fileStats) {
 				stats.skippedMissingFile += 1;
+				if (stats.sampleMissingFiles.length < 3) {
+					stats.sampleMissingFiles.push(filePath);
+				}
 				skippedMissingFile += 1;
 				continue;
 			}
@@ -139,6 +173,26 @@ export async function syncMediaUnits(
 					.filter(Boolean)
 					.join(", "),
 			);
+			if (stats.sampleOutsidePaths.length) {
+				console.log(
+					`  Sample outside-path file: ${stats.sampleOutsidePaths.join(", ")}`,
+				);
+			}
+			if (stats.sampleMissingFiles.length) {
+				console.log(
+					`  Sample missing/unreadable entry: ${stats.sampleMissingFiles.join(", ")}`,
+				);
+			}
+			if (!stats.imported && stats.fetched > 0) {
+				console.log(
+					"  No items imported from this library. Check path configuration and filesystem access.",
+				);
+			}
+			if (stats.fetched === 0) {
+				console.log(
+					"  Library returned zero items from Tautulli. Confirm the library is enabled in Tautulli.",
+				);
+			}
 		}
 	}
 
