@@ -19,6 +19,13 @@ type TautulliResponse<T> =
     | { response: TautulliSuccessResponse<T> }
     | { response: TautulliErrorResponse };
 
+interface RawTautulliLibrary {
+	section_id: number | string;
+	section_name: string;
+	section_type: string;
+	count: number | string;
+}
+
 export interface TautulliLibrary {
 	section_id: number;
 	section_name: string;
@@ -68,10 +75,15 @@ export class TautulliClient {
 	}
 
 	async getLibraries(): Promise<TautulliLibrary[]> {
-		const data = await this.request<{ libraries: TautulliLibrary[] }>(
-			"get_libraries",
-		);
-		return data.libraries ?? [];
+		const data = await this.request<
+			RawTautulliLibrary[] | { libraries: RawTautulliLibrary[] }
+		>("get_libraries");
+		const libraries = Array.isArray(data)
+			? data
+			: Array.isArray(data?.libraries)
+				? data.libraries
+				: [];
+		return libraries.map(normalizeLibrary);
 	}
 
 	async getLibraryMediaItems(sectionId: number): Promise<TautulliMediaItem[]> {
@@ -172,6 +184,15 @@ export class TautulliClient {
             );
         }
 
-        return data;
+		return data;
 	}
+}
+
+function normalizeLibrary(raw: RawTautulliLibrary): TautulliLibrary {
+	return {
+		section_id: Number(raw.section_id),
+		section_name: raw.section_name,
+		section_type: raw.section_type,
+		count: Number(raw.count),
+	};
 }
