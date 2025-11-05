@@ -1,6 +1,6 @@
 import type {
-	MediaItem,
-	ScoredMediaItem,
+	MediaUnit,
+	ScoredMediaUnit,
 	ScoringMetrics,
 	WeightConfig,
 } from "./types.ts";
@@ -18,16 +18,18 @@ export interface ScoreOptions {
 	now?: Date;
 	targetPlaysPerYear?: number;
 	saturationAgeYears?: number;
+	targetPlaysPerGb?: number;
 }
 
 export function scoreMediaItems(
-	items: MediaItem[],
+	items: MediaUnit[],
 	options: ScoreOptions = {},
-): ScoredMediaItem[] {
+): ScoredMediaUnit[] {
 	const weights = options.weights ?? defaultWeights;
 	const now = options.now ?? new Date();
 	const targetPlaysPerYear = options.targetPlaysPerYear ?? 0.5;
 	const saturationAgeYears = options.saturationAgeYears ?? 5;
+	const targetPlaysPerGb = options.targetPlaysPerGb ?? 0.02;
 
 	const maxSize = Math.max(...items.map((item) => item.sizeBytes), 1);
 
@@ -39,6 +41,7 @@ export function scoreMediaItems(
 				maxSize,
 				targetPlaysPerYear,
 				saturationAgeYears,
+				targetPlaysPerGb,
 			});
 			const score =
 				metrics.sizeScore * weights.sizeWeight +
@@ -55,11 +58,12 @@ export function scoreMediaItems(
 }
 
 interface ComputeMetricsParams {
-	item: MediaItem;
+	item: MediaUnit;
 	now: Date;
 	maxSize: number;
 	targetPlaysPerYear: number;
 	saturationAgeYears: number;
+	targetPlaysPerGb: number;
 }
 
 function computeMetrics({
@@ -68,6 +72,7 @@ function computeMetrics({
 	maxSize,
 	targetPlaysPerYear,
 	saturationAgeYears,
+	targetPlaysPerGb,
 }: ComputeMetricsParams): ScoringMetrics {
 	const ageMs = now.getTime() - item.addedAt.getTime();
 	const ageYears = Math.max(ageMs / YEAR_IN_MS, 0);
@@ -75,11 +80,17 @@ function computeMetrics({
 
 	const sizeScore = normalizeSize(item.sizeBytes, maxSize);
 
-	const playsPerYear = computePlaysPerYear(item.playCount, ageYears);
+	const playsPerYear = computePlaysPerYear(item.totalPlayCount, ageYears);
+	const playsPerGb = computePlaysPerGb(item.totalPlayCount, item.sizeBytes);
+	const coverageRatio =
+		item.itemCount === 0 ? 0 : item.itemsWithPlays / item.itemCount;
 	const watchScarcity = computeWatchScarcity({
 		playsPerYear,
 		normalizedAge,
 		targetPlaysPerYear,
+		playsPerGb,
+		targetPlaysPerGb,
+		coverageRatio,
 	});
 
 	return {
@@ -87,6 +98,8 @@ function computeMetrics({
 		ageScore: normalizedAge,
 		watchScarcityScore: watchScarcity,
 		playsPerYear,
+		playsPerGb,
+		coverageRatio,
 		ageYears,
 	};
 }
@@ -105,20 +118,46 @@ function computePlaysPerYear(playCount: number, ageYears: number): number {
 	return playCount / effectiveAge;
 }
 
+function computePlaysPerGb(playCount: number, sizeBytes: number): number {
+	const sizeGb = sizeBytes > 0 ? sizeBytes / 1024 ** 3 : 0;
+	if (sizeGb <= 0) {
+		return 0;
+	}
+	return playCount / sizeGb;
+}
+
 interface WatchScarcityParams {
 	playsPerYear: number;
 	normalizedAge: number;
 	targetPlaysPerYear: number;
+	playsPerGb: number;
+	targetPlaysPerGb: number;
+	coverageRatio: number;
 }
 
 function computeWatchScarcity({
 	playsPerYear,
 	normalizedAge,
 	targetPlaysPerYear,
+	playsPerGb,
+	targetPlaysPerGb,
+	coverageRatio,
 }: WatchScarcityParams): number {
-	const scarcity = clamp(1 - playsPerYear / targetPlaysPerYear, -1, 1);
-	const positiveScarcity = Math.max(0, scarcity);
-	return positiveScarcity * normalizedAge;
+	const playsPerYearScarcity = clamp(
+		1 - playsPerYear / targetPlaysPerYear,
+		0,
+		1,
+	);
+	const playsPerGbScarcity = clamp(1 - playsPerGb / targetPlaysPerGb, 0, 1);
+	const coverageScarcity = clamp(1 - coverageRatio, 0, 1);
+
+	const compositeScarcity =
+		playsPerYearScarcity * 0.5 +
+		playsPerGbScarcity * 0.3 +
+		coverageScarcity * 0.2;
+
+	const ageMultiplier = 0.5 + normalizedAge * 0.5;
+	return clamp(compositeScarcity * ageMultiplier, 0, 1);
 }
 
 function clamp(value: number, min: number, max: number): number {

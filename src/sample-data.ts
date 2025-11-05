@@ -1,107 +1,178 @@
-import type { MediaItem } from "./types.ts";
+import { aggregateMediaUnits } from "./aggregation.ts";
+import type { MediaSource, MediaUnit } from "./types.ts";
 
 interface SampleOptions {
 	now?: Date;
 }
 
-export function generateSampleMedia(options: SampleOptions = {}): MediaItem[] {
+export function generateSampleMedia(options: SampleOptions = {}): MediaUnit[] {
 	const now = options.now ?? new Date();
 
-	return [
-		createSample({
-			id: "m1",
+	const sources: MediaSource[] = [
+		createMovie({
+			id: "movie-1",
 			title: "Forgotten Documentary",
 			sizeGb: 45,
 			yearsAgoAdded: 7,
-			plays: 0,
+			totalPlays: 0,
 			now,
 		}),
-		createSample({
-			id: "m2",
+		createMovie({
+			id: "movie-2",
 			title: "Cult Classic",
 			sizeGb: 68,
 			yearsAgoAdded: 9,
-			plays: 1,
+			totalPlays: 1,
 			now,
 		}),
-		createSample({
-			id: "m3",
+		createMovie({
+			id: "movie-3",
 			title: "Recent Blockbuster",
 			sizeGb: 85,
 			yearsAgoAdded: 0.2,
-			plays: 0,
+			totalPlays: 0,
 			now,
 		}),
-		createSample({
-			id: "m4",
-			title: "Family Favorite",
-			sizeGb: 12,
+		...createSeason({
+			showKey: "show-1",
+			showTitle: "Family Favorite",
+			seasonKey: "show-1-season-1",
+			seasonTitle: "Season 1",
+			episodeCount: 10,
+			sizeGbPerEpisode: 1.2,
 			yearsAgoAdded: 6,
-			plays: 14,
+			playCounts: [14, 12, 9, 6, 0, 0, 0, 0, 0, 0],
 			now,
 		}),
-		createSample({
-			id: "m5",
-			title: "Indie Film",
-			sizeGb: 8,
+		...createSeason({
+			showKey: "show-2",
+			showTitle: "Indie Anthology",
+			seasonKey: "show-2-season-1",
+			seasonTitle: "Season 1",
+			episodeCount: 8,
+			sizeGbPerEpisode: 1.0,
 			yearsAgoAdded: 4,
-			plays: 0,
+			playCounts: [0, 0, 0, 0, 0, 0, 0, 0],
 			now,
 		}),
-		createSample({
-			id: "m6",
-			title: "Classic Series Pilot",
-			sizeGb: 1.2,
+		...createSeason({
+			showKey: "show-3",
+			showTitle: "Classic Series",
+			seasonKey: "show-3-season-1",
+			seasonTitle: "Season 1",
+			episodeCount: 22,
+			sizeGbPerEpisode: 1.5,
 			yearsAgoAdded: 11,
-			plays: 0,
+			playCounts: new Array(22).fill(0),
 			now,
 		}),
-		createSample({
-			id: "m7",
-			title: "Animated Adventure",
-			sizeGb: 38,
-			yearsAgoAdded: 5.5,
-			plays: 2,
-			now,
-		}),
-		createSample({
-			id: "m8",
-			title: "Concert Recording",
-			sizeGb: 52,
-			yearsAgoAdded: 3,
-			plays: 1,
+		...createSeason({
+			showKey: "show-3",
+			showTitle: "Classic Series",
+			seasonKey: "show-3-season-2",
+			seasonTitle: "Season 2",
+			episodeCount: 22,
+			sizeGbPerEpisode: 1.4,
+			yearsAgoAdded: 8,
+			playCounts: [
+				1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			],
 			now,
 		}),
 	];
+
+	return aggregateMediaUnits(sources);
 }
 
-interface CreateSampleParams {
+interface CreateMovieParams {
 	id: string;
 	title: string;
 	sizeGb: number;
 	yearsAgoAdded: number;
-	plays: number;
+	totalPlays: number;
 	now: Date;
 }
 
-function createSample({
+function createMovie({
 	id,
 	title,
 	sizeGb,
 	yearsAgoAdded,
-	plays,
+	totalPlays,
 	now,
-}: CreateSampleParams): MediaItem {
-	const addedAt = new Date(now.getTime() - yearsAgoAdded * YEAR_IN_MS);
+}: CreateMovieParams): MediaSource {
+	const addedAt = yearsAgoAddedToDate(now, yearsAgoAdded);
 	return {
 		id,
 		title,
+		relativePath: null,
 		path: `/media/${title.replaceAll(" ", "_")}`,
 		sizeBytes: Math.round(sizeGb * 1024 ** 3),
 		addedAt,
-		lastPlayedAt: plays > 0 ? addedAt : null,
-		playCount: plays,
+		lastPlayedAt: totalPlays > 0 ? addedAt : null,
+		playCount: totalPlays,
+		librarySectionId: 1,
+		librarySectionName: "Movies",
+		episodeIndex: null,
+		seasonTitle: null,
+		showTitle: null,
+		seasonKey: null,
+		showKey: null,
+		mediaKind: "movie",
 	};
 }
 
+interface CreateSeasonParams {
+	showKey: string;
+	showTitle: string;
+	seasonKey: string;
+	seasonTitle: string;
+	episodeCount: number;
+	sizeGbPerEpisode: number;
+	yearsAgoAdded: number;
+	playCounts: number[];
+	now: Date;
+}
+
+function createSeason({
+	showKey,
+	showTitle,
+	seasonKey,
+	seasonTitle,
+	episodeCount,
+	sizeGbPerEpisode,
+	yearsAgoAdded,
+	playCounts,
+	now,
+}: CreateSeasonParams): MediaSource[] {
+	const addedAt = yearsAgoAddedToDate(now, yearsAgoAdded);
+	const items: MediaSource[] = [];
+	for (let i = 0; i < episodeCount; i += 1) {
+		const playCount = playCounts[i] ?? 0;
+		items.push({
+			id: `${seasonKey}-episode-${i + 1}`,
+			title: `${seasonTitle} Episode ${i + 1}`,
+			relativePath: null,
+			path: `/media/${showTitle.replaceAll(" ", "_")}/${seasonTitle.replaceAll(" ", "_")}/Episode_${i + 1}.mkv`,
+			sizeBytes: Math.round(sizeGbPerEpisode * 1024 ** 3),
+			addedAt,
+			lastPlayedAt: playCount > 0 ? addedAt : null,
+			playCount,
+			librarySectionId: 2,
+			librarySectionName: "TV",
+			episodeIndex: i + 1,
+			seasonTitle,
+			showTitle,
+			seasonKey,
+			showKey,
+			mediaKind: "episode",
+		});
+	}
+	return items;
+}
+
 const YEAR_IN_MS = 1000 * 60 * 60 * 24 * 365.25;
+
+function yearsAgoAddedToDate(now: Date, yearsAgo: number): Date {
+	return new Date(now.getTime() - yearsAgo * YEAR_IN_MS);
+}
