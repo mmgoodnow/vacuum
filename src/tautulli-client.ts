@@ -99,6 +99,8 @@ export class TautulliClient {
 					length: DEFAULT_PAGE_SIZE,
 					order_column: "title",
 					order_dir: "asc",
+					include: "file",
+					media_info: 1,
 				},
 			);
 
