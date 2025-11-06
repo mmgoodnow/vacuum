@@ -27,6 +27,8 @@ interface LibraryProcessingStats {
 	skippedDueToPath: number;
 	sampleOutsidePaths: string[];
 	sampleMissingFiles: string[];
+	metadataLookups: number;
+	metadataLookupFailures: number;
 }
 
 export async function syncMediaUnits(
@@ -118,7 +120,10 @@ export async function syncMediaUnits(
 			skippedDueToPath: 0,
 			sampleOutsidePaths: [],
 			sampleMissingFiles: [],
+			metadataLookups: 0,
+			metadataLookupFailures: 0,
 		};
+		let metadataResolutionLogs = 0;
 
 		if (options.verbose && items.length > 0) {
 			const [firstItem] = items;
@@ -141,7 +146,39 @@ export async function syncMediaUnits(
 				continue;
 			}
 
-			const filePath = item.file;
+			let filePath = item.file ?? null;
+			if (!filePath || filePath.length === 0) {
+				stats.metadataLookups += 1;
+				try {
+					const resolvedPath = await client.getMediaItemFilePath(
+						item.rating_key,
+					);
+					if (resolvedPath) {
+						filePath = resolvedPath;
+						if (
+							options.verbose &&
+							metadataResolutionLogs < 5
+						) {
+							console.log(
+								`    Resolved file via metadata for "${item.title}": ${resolvedPath}`,
+							);
+						}
+						metadataResolutionLogs += 1;
+					} else {
+						stats.metadataLookupFailures += 1;
+					}
+				} catch (error) {
+					stats.metadataLookupFailures += 1;
+					if (options.verbose) {
+						console.log(
+							`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						);
+					}
+				}
+			}
+
 			if (!filePath) {
 				stats.skippedMissingFile += 1;
 				if (stats.sampleMissingFiles.length < 3) {
@@ -198,6 +235,12 @@ export async function syncMediaUnits(
 					stats.skippedDueToPath
 						? `outside configured paths: ${stats.skippedDueToPath}`
 						: null,
+					stats.metadataLookups
+						? `metadata lookups: ${stats.metadataLookups}`
+						: null,
+					stats.metadataLookupFailures
+						? `metadata lookup failures: ${stats.metadataLookupFailures}`
+						: null,
 				]
 					.filter(Boolean)
 					.join(", "),
@@ -231,6 +274,19 @@ export async function syncMediaUnits(
 		console.log(
 			`Imported ${sources.length} source files into ${units.length} media units.`,
 		);
+		const totalMetadataLookups = libraryStats.reduce(
+			(sum, stats) => sum + stats.metadataLookups,
+			0,
+		);
+		const totalMetadataFailures = libraryStats.reduce(
+			(sum, stats) => sum + stats.metadataLookupFailures,
+			0,
+		);
+		if (totalMetadataLookups) {
+			console.log(
+				`Performed ${totalMetadataLookups} metadata lookups (${totalMetadataFailures} failed).`,
+			);
+		}
 		if (skippedUnsupported) {
 			console.log(`Skipped ${skippedUnsupported} items with unsupported types.`);
 		}

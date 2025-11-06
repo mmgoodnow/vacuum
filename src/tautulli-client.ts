@@ -63,6 +63,8 @@ export class TautulliClient {
 	private readonly baseUrl: string;
 	private readonly apiKey: string;
 	private readonly log: ((message: string) => void) | null;
+	private readonly metadataFileCache = new Map<string, string | null>();
+	private readonly commandLogCounters = new Map<string, number>();
 
 	constructor(config: TautulliConfig, logger?: (message: string) => void) {
 		this.baseUrl = config.baseUrl.replace(/\/+$/, "");
@@ -118,6 +120,35 @@ export class TautulliClient {
 		return items;
 	}
 
+	async getMediaItemFilePath(ratingKey: string): Promise<string | null> {
+		if (!ratingKey) {
+			return null;
+		}
+
+		if (this.metadataFileCache.has(ratingKey)) {
+			return this.metadataFileCache.get(ratingKey) ?? null;
+		}
+
+		try {
+			const data = await this.request<unknown>("get_metadata", {
+				rating_key: ratingKey,
+				include: "media_info",
+			});
+			const metadata = unwrapMetadataPayload(data);
+			const filePath = extractFilePathFromMetadata(metadata);
+			if (!filePath) {
+				this.log?.(
+					`[Tautulli] Metadata lookup for ${ratingKey} returned no file path.`,
+				);
+			}
+			this.metadataFileCache.set(ratingKey, filePath ?? null);
+			return filePath ?? null;
+		} catch (error) {
+			this.metadataFileCache.set(ratingKey, null);
+			throw error;
+		}
+	}
+
 	private async request<T>(
 		cmd: string,
 		params: Record<string, unknown> = {},
@@ -136,7 +167,8 @@ export class TautulliClient {
 			url.searchParams.set(key, String(value));
 		}
 
-		if (this.log) {
+		const shouldLog = this.shouldLog(cmd);
+		if (shouldLog && this.log) {
 			const safeUrl = new URL(url);
 			safeUrl.searchParams.set("apikey", "***");
 			this.log(
@@ -156,37 +188,50 @@ export class TautulliClient {
 			);
 		}
 
-        const payload = (await response.json()) as TautulliResponse<T>;
-        if (payload.response.result !== "success") {
-            this.log?.(
-                `[Tautulli] Response cmd=${cmd} status=error message=${payload.response.message ?? "(none)"}`,
-            );
-            throw new Error(
-                `Tautulli error: ${payload.response.message ?? "Unknown error"}`,
-            );
-        }
+		const payload = (await response.json()) as TautulliResponse<T>;
+		if (payload.response.result !== "success") {
+			this.log?.(
+				`[Tautulli] Response cmd=${cmd} status=error message=${payload.response.message ?? "(none)"}`,
+			);
+			throw new Error(
+				`Tautulli error: ${payload.response.message ?? "Unknown error"}`,
+			);
+		}
 
-        const data = payload.response.data;
-        if (this.log) {
-            const describeData = (value: unknown): string => {
-                if (value === null || value === undefined) {
-                    return String(value);
-                }
-                if (Array.isArray(value)) {
-                    return `array(len=${value.length})`;
-                }
-                if (typeof value === "object") {
-                    return `object(keys=${Object.keys(value).join(",")})`;
-                }
-                return String(value);
-            };
-
-            this.log(
-                `[Tautulli] Response cmd=${cmd} status=success data=${describeData(data)}`,
-            );
-        }
+		const data = payload.response.data;
+		if (shouldLog && this.log) {
+			this.log(
+				`[Tautulli] Response cmd=${cmd} status=success data=${describeTautulliData(data)}`,
+			);
+		}
 
 		return data;
+	}
+
+	private shouldLog(cmd: string): boolean {
+		if (!this.log) {
+			return false;
+		}
+		if (cmd !== "get_metadata") {
+			return true;
+		}
+
+		const count = this.commandLogCounters.get(cmd) ?? 0;
+		if (count < 5) {
+			this.commandLogCounters.set(cmd, count + 1);
+			return true;
+		}
+
+		if (count === 5) {
+			this.commandLogCounters.set(cmd, count + 1);
+			this.log(
+				`[Tautulli] Suppressing further ${cmd} logs after first 5 entries.`,
+			);
+		} else {
+			this.commandLogCounters.set(cmd, count + 1);
+		}
+
+		return false;
 	}
 }
 
@@ -197,4 +242,120 @@ function normalizeLibrary(raw: RawTautulliLibrary): TautulliLibrary {
 		section_type: raw.section_type,
 		count: Number(raw.count),
 	};
+}
+
+function unwrapMetadataPayload(payload: unknown): unknown {
+	if (!payload || typeof payload !== "object") {
+		return payload;
+	}
+
+	let current: unknown = payload;
+	const visited = new Set<unknown>();
+
+	while (current && typeof current === "object" && !visited.has(current)) {
+		visited.add(current);
+		const record = current as Record<string, unknown>;
+
+		if ("metadata" in record && record.metadata) {
+			current = record.metadata;
+			continue;
+		}
+
+		if ("data" in record && record.data) {
+			current = record.data;
+			continue;
+		}
+
+		break;
+	}
+
+	return current;
+}
+
+const FILE_PATH_KEYS = new Set(["file", "file_path", "filepath", "fullpath", "path"]);
+
+function extractFilePathFromMetadata(metadata: unknown): string | null {
+	const visited = new Set<unknown>();
+	const stack: unknown[] = [metadata];
+
+	while (stack.length) {
+		const current = stack.pop();
+		if (current === undefined || current === null) {
+			continue;
+		}
+
+		if (typeof current === "string") {
+			if (isLikelyFileSystemPath(current)) {
+				return current;
+			}
+			continue;
+		}
+
+		if (typeof current !== "object") {
+			continue;
+		}
+
+		if (visited.has(current)) {
+			continue;
+		}
+		visited.add(current);
+
+		if (Array.isArray(current)) {
+			for (const value of current) {
+				stack.push(value);
+			}
+			continue;
+		}
+
+		const record = current as Record<string, unknown>;
+
+		for (const [key, value] of Object.entries(record)) {
+			if (typeof value === "string") {
+				if (
+					FILE_PATH_KEYS.has(key.toLowerCase()) &&
+					isLikelyFileSystemPath(value)
+				) {
+					return value;
+				}
+			}
+		}
+
+		for (const value of Object.values(record)) {
+			stack.push(value);
+		}
+	}
+
+	return null;
+}
+
+function isLikelyFileSystemPath(value: string): boolean {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return false;
+	}
+	if (!(trimmed.includes("/") || trimmed.includes("\\"))) {
+		return false;
+	}
+	if (trimmed.startsWith("/library/metadata/")) {
+		return false;
+	}
+	const segments = trimmed.split(/[\\/]/);
+	const lastSegment = segments[segments.length - 1] ?? "";
+	if (!lastSegment) {
+		return false;
+	}
+	return lastSegment.includes(".");
+}
+
+function describeTautulliData(value: unknown): string {
+	if (value === null || value === undefined) {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		return `array(len=${value.length})`;
+	}
+	if (typeof value === "object") {
+		return `object(keys=${Object.keys(value).join(",")})`;
+	}
+	return String(value);
 }
