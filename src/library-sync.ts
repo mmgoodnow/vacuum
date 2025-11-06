@@ -120,6 +120,20 @@ export async function syncMediaUnits(
 			sampleMissingFiles: [],
 		};
 
+		if (options.verbose && items.length > 0) {
+			const [firstItem] = items;
+			if (firstItem) {
+				const rawPreview = JSON.stringify(firstItem, null, 2);
+				const truncatedPreview =
+					rawPreview.length > 800
+						? `${rawPreview.slice(0, 800)} … (truncated)`
+						: rawPreview;
+				console.log(
+					`  Sample raw item: keys=${Object.keys(firstItem).join(", ")}\n${truncatedPreview}`,
+				);
+			}
+		}
+
 		for (const item of items) {
 			if (!isSupportedMediaType(item.media_type)) {
 				stats.skippedUnsupported += 1;
