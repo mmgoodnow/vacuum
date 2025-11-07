@@ -9,7 +9,21 @@ import type { AppConfig, ScoredMediaUnit, WeightConfig } from "./types.ts";
 async function main(): Promise<void> {
 	console.log("🧹 Vacuum — Plex library space recovery helper");
 
+	const cliArgs = process.argv.slice(2);
+	const requestedAction = getCliAction(cliArgs);
+
+	if (requestedAction === "help") {
+		printCliUsage();
+		return;
+	}
+
 	let config = await loadOrCreateConfig();
+
+	if (requestedAction && requestedAction !== "interactive") {
+		await runAction(requestedAction, config);
+		return;
+	}
+
 	let exit = false;
 
 	while (!exit) {
@@ -51,6 +65,69 @@ async function main(): Promise<void> {
 	}
 
 	console.log("Goodbye!");
+}
+
+type MenuAction =
+	| "sync"
+	| "preview"
+	| "weights"
+	| "config"
+	| "quit"
+	| "interactive"
+	| "help";
+
+function getCliAction(args: string[]): MenuAction {
+	const [firstArg] = args;
+	switch (firstArg) {
+		case "sync":
+			return "sync";
+		case "preview":
+			return "preview";
+		case "weights":
+			return "weights";
+		case "config":
+			return "config";
+		case "help":
+		case "-h":
+		case "--help":
+			return "help";
+		case undefined:
+		default:
+			return "interactive";
+	}
+}
+
+async function runAction(action: MenuAction, config: AppConfig): Promise<void> {
+	switch (action) {
+		case "preview":
+			await previewRanking(config);
+			break;
+		case "sync":
+			await syncAndRank(config);
+			break;
+		case "weights":
+			await adjustWeights(config);
+			break;
+		case "config":
+			await reconfigure(config);
+			break;
+		case "quit":
+		default:
+			break;
+	}
+}
+
+function printCliUsage(): void {
+	console.log(`Usage: node src/index.ts [command]
+
+Commands:
+  sync        Run "Sync libraries via Tautulli" once and exit.
+  preview     Run the sample data preview and exit.
+  weights     Enter the weight adjustment workflow.
+  config      Enter configuration editing.
+  help        Show this help text.
+
+With no command, the interactive menu launches as before.`);
 }
 
 async function previewRanking(config: AppConfig): Promise<void> {

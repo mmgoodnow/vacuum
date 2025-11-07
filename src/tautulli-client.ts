@@ -65,6 +65,7 @@ export class TautulliClient {
 	private readonly log: ((message: string) => void) | null;
 	private readonly metadataFileCache = new Map<string, string | null>();
 	private readonly commandLogCounters = new Map<string, number>();
+	private metadataNoFileLogCount = 0;
 
 	constructor(config: TautulliConfig, logger?: (message: string) => void) {
 		this.baseUrl = config.baseUrl.replace(/\/+$/, "");
@@ -137,9 +138,16 @@ export class TautulliClient {
 			const metadata = unwrapMetadataPayload(data);
 			const filePath = extractFilePathFromMetadata(metadata);
 			if (!filePath) {
-				this.log?.(
-					`[Tautulli] Metadata lookup for ${ratingKey} returned no file path.`,
-				);
+				if (this.metadataNoFileLogCount < 5) {
+					this.log?.(
+						`[Tautulli] Metadata lookup for ${ratingKey} returned no file path. Sample payload: ${safeStringify(metadata)}`,
+					);
+				} else if (this.metadataNoFileLogCount === 5) {
+					this.log?.(
+						"[Tautulli] Further metadata payload logging suppressed.",
+					);
+				}
+				this.metadataNoFileLogCount += 1;
 			}
 			this.metadataFileCache.set(ratingKey, filePath ?? null);
 			return filePath ?? null;
@@ -358,4 +366,16 @@ function describeTautulliData(value: unknown): string {
 		return `object(keys=${Object.keys(value).join(",")})`;
 	}
 	return String(value);
+}
+
+function safeStringify(value: unknown, maxLength = 500): string {
+	try {
+		const serialized = JSON.stringify(value, null, 2);
+		if (serialized.length > maxLength) {
+			return `${serialized.slice(0, maxLength)}… (truncated)`;
+		}
+		return serialized;
+	} catch {
+		return "[unserializable payload]";
+	}
 }
