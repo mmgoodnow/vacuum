@@ -9,21 +9,24 @@ import type { AppConfig, ScoredMediaUnit, WeightConfig } from "./types.ts";
 
 interface RunOptions {
 	verbose: boolean;
+	output: "table" | "tsv";
 }
 
 const DEFAULT_RUN_OPTIONS: RunOptions = {
 	verbose: false,
+	output: "table",
 };
 
 async function main(): Promise<void> {
-	console.log("🧹 Vacuum — Plex library space recovery helper");
-
 	const cliArgs = process.argv.slice(2);
 	const { action: requestedAction, flags } = parseCliArgs(cliArgs);
 	const runOptions: RunOptions = {
 		...DEFAULT_RUN_OPTIONS,
 		verbose: hasFlag(flags, "--verbose", "-v"),
+		output: hasFlag(flags, "--tsv") ? "tsv" : "table",
 	};
+
+	logInfo("🧹 Vacuum — Plex library space recovery helper", runOptions);
 
 	if (requestedAction === "help" || hasFlag(flags, "--help", "-h")) {
 		printCliUsage();
@@ -147,6 +150,14 @@ async function runAction(
 	}
 }
 
+function logInfo(message: string, options: RunOptions): void {
+	if (options.output === "tsv") {
+		console.error(message);
+	} else {
+		console.log(message);
+	}
+}
+
 function printCliUsage(): void {
 	console.log(`Usage: node src/index.ts [command] [options]
 
@@ -160,6 +171,7 @@ Commands:
 
 Options:
   -v, --verbose   Enable detailed logging for supported commands.
+      --tsv       Output full rankings as tab-separated values.
 
 With no command, the interactive menu launches as before.`);
 }
@@ -199,18 +211,53 @@ function printScoredTable(items: ScoredMediaUnit[]): void {
 	console.table(rows);
 }
 
+function printScoredTsv(items: ScoredMediaUnit[]): void {
+	const headers = [
+		"rank",
+		"kind",
+		"title",
+		"section",
+		"size_gb",
+		"age_years",
+		"plays",
+		"plays_per_year",
+		"plays_per_gb",
+		"coverage_pct",
+		"score",
+	];
+	console.log(headers.join("\t"));
+
+	items.forEach((item, index) => {
+		const row = [
+			String(index + 1),
+			item.kind,
+			item.title,
+			item.librarySectionName,
+			formatNumber(item.sizeBytes / 1024 ** 3, 2),
+			formatNumber(item.metrics.ageYears, 1),
+			String(item.totalPlayCount),
+			formatNumber(item.metrics.playsPerYear, 2),
+			formatNumber(item.metrics.playsPerGb, 3),
+			formatNumber(item.metrics.coverageRatio * 100, 1),
+			formatNumber(item.score, 3),
+		];
+		console.log(row.join("\t"));
+	});
+}
+
 async function syncAndRank(
 	config: AppConfig,
 	options: RunOptions = DEFAULT_RUN_OPTIONS,
 ): Promise<void> {
 	if (!config.tautulli) {
-		console.log(
+		logInfo(
 			"\nTautulli is not configured yet. Choose 'Edit configuration' first.",
+			options,
 		);
 		return;
 	}
 
-	console.log("\nSyncing libraries via Tautulli...");
+	logInfo("\nSyncing libraries via Tautulli...", options);
 	try {
 		const result = await syncMediaUnits(config, { verbose: options.verbose });
 		if (result.units.length === 0) {
@@ -222,9 +269,14 @@ async function syncAndRank(
 			weights: config.weights,
 		});
 
-		printScoredTable(scored.slice(0, 25));
-		console.log(
+		if (options.output === "tsv") {
+			printScoredTsv(scored);
+		} else {
+			printScoredTable(scored.slice(0, 25));
+		}
+		logInfo(
 			`\nRanked ${result.units.length} units. Skipped ${result.skippedDueToPath} outside configured paths, ${result.skippedMissingFile} missing files.`,
+			options,
 		);
 	} catch (error) {
 		console.error("Failed to sync libraries:", error);
@@ -251,23 +303,25 @@ async function dropStaleEntries(
 	options: RunOptions = DEFAULT_RUN_OPTIONS,
 ): Promise<void> {
 	if (!config.tautulli) {
-		console.log(
+		logInfo(
 			"\nTautulli is not configured yet. Choose 'Edit configuration' first.",
+			options,
 		);
 		return;
 	}
 
-	console.log(
+	logInfo(
 		"\nDropping stale entries by clearing Tautulli media cache and refreshing libraries...",
+		options,
 	);
 	const verbose = options.verbose;
 	const client = new TautulliClient(
 		config.tautulli,
-		verbose ? (message) => console.log(message) : undefined,
+		verbose ? (message) => console.error(message) : undefined,
 	);
 	const libraries = await client.getLibraries();
 	if (!libraries.length) {
-		console.log("No libraries were returned by Tautulli.");
+		logInfo("No libraries were returned by Tautulli.", options);
 		return;
 	}
 
@@ -275,19 +329,19 @@ async function dropStaleEntries(
 	for (const library of libraries) {
 		try {
 			if (verbose) {
-				console.log(
+				console.error(
 					`- Clearing cache for ${library.section_name} (${library.section_id})`,
 				);
 			}
 			const message = await client.deleteMediaInfoCache(library.section_id);
 			if (message && verbose) {
-				console.log(`  ${message}`);
+				console.error(`  ${message}`);
 			}
 			await client.getLibraryMediaItems(library.section_id, {
 				refresh: true,
 			});
 			if (verbose) {
-				console.log("  Refreshed from Plex.");
+				console.error("  Refreshed from Plex.");
 			}
 			refreshed += 1;
 		} catch (error) {
@@ -299,10 +353,11 @@ async function dropStaleEntries(
 		}
 	}
 
-	console.log(
+	logInfo(
 		`\nCompleted refresh for ${refreshed} ${
 			refreshed === 1 ? "library" : "libraries"
 		}. Run 'node src/index.ts sync --verbose' to verify the stale entries are gone.`,
+		options,
 	);
 }
 
