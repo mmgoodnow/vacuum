@@ -4,6 +4,7 @@ import { loadOrCreateConfig, saveConfig } from "./config.ts";
 import { syncMediaUnits } from "./library-sync.ts";
 import { generateSampleMedia } from "./sample-data.ts";
 import { defaultWeights, scoreMediaItems } from "./scoring.ts";
+import { TautulliClient } from "./tautulli-client.ts";
 import type { AppConfig, ScoredMediaUnit, WeightConfig } from "./types.ts";
 
 async function main(): Promise<void> {
@@ -37,6 +38,10 @@ async function main(): Promise<void> {
 					{ name: "Preview ranking with sample data", value: "preview" },
 					{ name: "Adjust scoring weights", value: "weights" },
 					{ name: "Edit configuration", value: "config" },
+					{
+						name: "Drop stale Tautulli entries (refresh media cache)",
+						value: "prune",
+					},
 					{ name: "Quit", value: "quit" },
 				],
 			},
@@ -72,6 +77,7 @@ type MenuAction =
 	| "preview"
 	| "weights"
 	| "config"
+	| "prune"
 	| "quit"
 	| "interactive"
 	| "help";
@@ -87,6 +93,8 @@ function getCliAction(args: string[]): MenuAction {
 			return "weights";
 		case "config":
 			return "config";
+		case "prune":
+			return "prune";
 		case "help":
 		case "-h":
 		case "--help":
@@ -111,6 +119,9 @@ async function runAction(action: MenuAction, config: AppConfig): Promise<void> {
 		case "config":
 			await reconfigure(config);
 			break;
+		case "prune":
+			await dropStaleEntries(config);
+			break;
 		case "quit":
 		default:
 			break;
@@ -125,6 +136,7 @@ Commands:
   preview     Run the sample data preview and exit.
   weights     Enter the weight adjustment workflow.
   config      Enter configuration editing.
+  prune       Drop stale Tautulli entries by refreshing media cache.
   help        Show this help text.
 
 With no command, the interactive menu launches as before.`);
@@ -207,6 +219,55 @@ async function adjustWeights(current: AppConfig): Promise<AppConfig> {
 	await saveConfig(updatedConfig);
 	console.log("Updated weights saved.");
 	return updatedConfig;
+}
+
+async function dropStaleEntries(config: AppConfig): Promise<void> {
+	if (!config.tautulli) {
+		console.log(
+			"\nTautulli is not configured yet. Choose 'Edit configuration' first.",
+		);
+		return;
+	}
+
+	console.log(
+		"\nDropping stale entries by clearing Tautulli media cache and refreshing libraries...",
+	);
+	const client = new TautulliClient(config.tautulli);
+	const libraries = await client.getLibraries();
+	if (!libraries.length) {
+		console.log("No libraries were returned by Tautulli.");
+		return;
+	}
+
+	let refreshed = 0;
+	for (const library of libraries) {
+		try {
+			console.log(
+				`- Clearing cache for ${library.section_name} (${library.section_id})`,
+			);
+			const message = await client.deleteMediaInfoCache(library.section_id);
+			if (message) {
+				console.log(`  ${message}`);
+			}
+			await client.getLibraryMediaItems(library.section_id, {
+				refresh: true,
+			});
+			console.log("  Refreshed from Plex.");
+			refreshed += 1;
+		} catch (error) {
+			console.error(
+				`  Failed to refresh ${library.section_name}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+		}
+	}
+
+	console.log(
+		`\nCompleted refresh for ${refreshed} ${
+			refreshed === 1 ? "library" : "libraries"
+		}. Run 'node src/index.ts sync --verbose' to verify the stale entries are gone.`,
+	);
 }
 
 async function reconfigure(current: AppConfig): Promise<AppConfig> {

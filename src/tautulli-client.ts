@@ -59,6 +59,10 @@ interface LibraryMediaResponse {
 	recordsTotal: number;
 }
 
+interface LibraryMediaOptions {
+	refresh?: boolean;
+}
+
 export class TautulliClient {
 	private readonly baseUrl: string;
 	private readonly apiKey: string;
@@ -89,7 +93,10 @@ export class TautulliClient {
 		return libraries.map(normalizeLibrary);
 	}
 
-	async getLibraryMediaItems(sectionId: number): Promise<TautulliMediaItem[]> {
+	async getLibraryMediaItems(
+		sectionId: number,
+		options: LibraryMediaOptions = {},
+	): Promise<TautulliMediaItem[]> {
 		const items: TautulliMediaItem[] = [];
 		let start = 0;
 
@@ -104,6 +111,7 @@ export class TautulliClient {
 					order_dir: "asc",
 					include: "file",
 					media_info: 1,
+					refresh: options.refresh ? "true" : undefined,
 				},
 			);
 
@@ -155,6 +163,18 @@ export class TautulliClient {
 			this.metadataFileCache.set(ratingKey, null);
 			throw error;
 		}
+	}
+
+	async deleteMediaInfoCache(sectionId: number): Promise<string | null> {
+		const result = await this.request<{ message?: string }>(
+			"delete_media_info_cache",
+			{ section_id: sectionId },
+		);
+		if (result && typeof result === "object" && "message" in result) {
+			const message = result.message;
+			return typeof message === "string" ? message : null;
+		}
+		return null;
 	}
 
 	private async request<T>(
