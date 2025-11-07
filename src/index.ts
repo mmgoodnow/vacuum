@@ -7,13 +7,25 @@ import { defaultWeights, scoreMediaItems } from "./scoring.ts";
 import { TautulliClient } from "./tautulli-client.ts";
 import type { AppConfig, ScoredMediaUnit, WeightConfig } from "./types.ts";
 
+interface RunOptions {
+	verbose: boolean;
+}
+
+const DEFAULT_RUN_OPTIONS: RunOptions = {
+	verbose: false,
+};
+
 async function main(): Promise<void> {
 	console.log("🧹 Vacuum — Plex library space recovery helper");
 
 	const cliArgs = process.argv.slice(2);
-	const requestedAction = getCliAction(cliArgs);
+	const { action: requestedAction, flags } = parseCliArgs(cliArgs);
+	const runOptions: RunOptions = {
+		...DEFAULT_RUN_OPTIONS,
+		verbose: hasFlag(flags, "--verbose", "-v"),
+	};
 
-	if (requestedAction === "help") {
+	if (requestedAction === "help" || hasFlag(flags, "--help", "-h")) {
 		printCliUsage();
 		return;
 	}
@@ -21,7 +33,7 @@ async function main(): Promise<void> {
 	let config = await loadOrCreateConfig();
 
 	if (requestedAction && requestedAction !== "interactive") {
-		await runAction(requestedAction, config);
+		await runAction(requestedAction, config, runOptions);
 		return;
 	}
 
@@ -47,26 +59,12 @@ async function main(): Promise<void> {
 			},
 		]);
 
-		switch (action) {
-			case "preview":
-				await previewRanking(config);
-				break;
-			case "sync":
-				await syncAndRank(config);
-				break;
-			case "weights":
-				config = await adjustWeights(config);
-				break;
-			case "config":
-				config = await reconfigure(config);
-				break;
-			case "quit":
-				exit = true;
-				break;
-			default:
-				exit = true;
-				break;
+		if (action === "quit") {
+			exit = true;
+			continue;
 		}
+
+		config = await runAction(action, config, runOptions);
 	}
 
 	console.log("Goodbye!");
@@ -82,9 +80,30 @@ type MenuAction =
 	| "interactive"
 	| "help";
 
-function getCliAction(args: string[]): MenuAction {
-	const [firstArg] = args;
-	switch (firstArg) {
+function parseCliArgs(
+	args: string[],
+): { action: MenuAction; flags: Set<string> } {
+	let command: string | undefined;
+	const flags = new Set<string>();
+
+	for (const arg of args) {
+		if (!command && arg && !arg.startsWith("-")) {
+			command = arg;
+		} else if (arg) {
+			flags.add(arg);
+		}
+	}
+
+	const action = getCliAction(command);
+	return { action, flags };
+}
+
+function hasFlag(flags: Set<string>, ...aliases: string[]): boolean {
+	return aliases.some((alias) => flags.has(alias));
+}
+
+function getCliAction(command?: string): MenuAction {
+	switch (command) {
 		case "sync":
 			return "sync";
 		case "preview":
@@ -96,8 +115,6 @@ function getCliAction(args: string[]): MenuAction {
 		case "prune":
 			return "prune";
 		case "help":
-		case "-h":
-		case "--help":
 			return "help";
 		case undefined:
 		default:
@@ -105,31 +122,33 @@ function getCliAction(args: string[]): MenuAction {
 	}
 }
 
-async function runAction(action: MenuAction, config: AppConfig): Promise<void> {
+async function runAction(
+	action: MenuAction,
+	config: AppConfig,
+	options: RunOptions,
+): Promise<AppConfig> {
 	switch (action) {
 		case "preview":
 			await previewRanking(config);
-			break;
+			return config;
 		case "sync":
-			await syncAndRank(config);
-			break;
+			await syncAndRank(config, options);
+			return config;
 		case "weights":
-			await adjustWeights(config);
-			break;
+			return adjustWeights(config);
 		case "config":
-			await reconfigure(config);
-			break;
+			return reconfigure(config);
 		case "prune":
-			await dropStaleEntries(config);
-			break;
+			await dropStaleEntries(config, options);
+			return config;
 		case "quit":
 		default:
-			break;
+			return config;
 	}
 }
 
 function printCliUsage(): void {
-	console.log(`Usage: node src/index.ts [command]
+	console.log(`Usage: node src/index.ts [command] [options]
 
 Commands:
   sync        Run "Sync libraries via Tautulli" once and exit.
@@ -138,6 +157,9 @@ Commands:
   config      Enter configuration editing.
   prune       Drop stale Tautulli entries by refreshing media cache.
   help        Show this help text.
+
+Options:
+  -v, --verbose   Enable detailed logging for supported commands.
 
 With no command, the interactive menu launches as before.`);
 }
@@ -177,7 +199,10 @@ function printScoredTable(items: ScoredMediaUnit[]): void {
 	console.table(rows);
 }
 
-async function syncAndRank(config: AppConfig): Promise<void> {
+async function syncAndRank(
+	config: AppConfig,
+	options: RunOptions = DEFAULT_RUN_OPTIONS,
+): Promise<void> {
 	if (!config.tautulli) {
 		console.log(
 			"\nTautulli is not configured yet. Choose 'Edit configuration' first.",
@@ -187,7 +212,7 @@ async function syncAndRank(config: AppConfig): Promise<void> {
 
 	console.log("\nSyncing libraries via Tautulli...");
 	try {
-		const result = await syncMediaUnits(config, { verbose: true });
+		const result = await syncMediaUnits(config, { verbose: options.verbose });
 		if (result.units.length === 0) {
 			console.log("No media items were discovered.");
 			return;
@@ -221,7 +246,10 @@ async function adjustWeights(current: AppConfig): Promise<AppConfig> {
 	return updatedConfig;
 }
 
-async function dropStaleEntries(config: AppConfig): Promise<void> {
+async function dropStaleEntries(
+	config: AppConfig,
+	options: RunOptions = DEFAULT_RUN_OPTIONS,
+): Promise<void> {
 	if (!config.tautulli) {
 		console.log(
 			"\nTautulli is not configured yet. Choose 'Edit configuration' first.",
@@ -232,7 +260,11 @@ async function dropStaleEntries(config: AppConfig): Promise<void> {
 	console.log(
 		"\nDropping stale entries by clearing Tautulli media cache and refreshing libraries...",
 	);
-	const client = new TautulliClient(config.tautulli);
+	const verbose = options.verbose;
+	const client = new TautulliClient(
+		config.tautulli,
+		verbose ? (message) => console.log(message) : undefined,
+	);
 	const libraries = await client.getLibraries();
 	if (!libraries.length) {
 		console.log("No libraries were returned by Tautulli.");
@@ -242,17 +274,21 @@ async function dropStaleEntries(config: AppConfig): Promise<void> {
 	let refreshed = 0;
 	for (const library of libraries) {
 		try {
-			console.log(
-				`- Clearing cache for ${library.section_name} (${library.section_id})`,
-			);
+			if (verbose) {
+				console.log(
+					`- Clearing cache for ${library.section_name} (${library.section_id})`,
+				);
+			}
 			const message = await client.deleteMediaInfoCache(library.section_id);
-			if (message) {
+			if (message && verbose) {
 				console.log(`  ${message}`);
 			}
 			await client.getLibraryMediaItems(library.section_id, {
 				refresh: true,
 			});
-			console.log("  Refreshed from Plex.");
+			if (verbose) {
+				console.log("  Refreshed from Plex.");
+			}
 			refreshed += 1;
 		} catch (error) {
 			console.error(
