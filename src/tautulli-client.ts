@@ -51,6 +51,7 @@ export interface TautulliMediaItem {
 	section_id: number;
 	section_name: string;
 	year?: number | null;
+	updated_at?: number | null;
 }
 
 interface LibraryMediaResponse {
@@ -130,6 +131,32 @@ export class TautulliClient {
 		}
 
 		return items;
+	}
+
+	async getChildrenMetadata(
+		ratingKey: string,
+		mediaType: "show" | "season",
+	): Promise<TautulliMediaItem[]> {
+		const data = await this.request<ChildrenMetadataResponse>(
+			"get_children_metadata",
+			{
+				rating_key: ratingKey,
+				media_type: mediaType,
+			},
+		);
+
+		const list = Array.isArray(data.children_list)
+			? data.children_list
+			: [];
+
+		const normalized: TautulliMediaItem[] = [];
+		for (const child of list) {
+			const item = normalizeChildItem(child);
+			if (item) {
+				normalized.push(item);
+			}
+		}
+		return normalized;
 	}
 
 	async getMediaItemFilePath(ratingKey: string): Promise<string | null> {
@@ -275,6 +302,47 @@ function normalizeLibrary(raw: RawTautulliLibrary): TautulliLibrary {
 	};
 }
 
+function normalizeChildItem(raw: RawChildItem): TautulliMediaItem | null {
+	const ratingKey = raw.rating_key;
+	const mediaType = raw.media_type;
+
+	if (!ratingKey || !mediaType) {
+		return null;
+	}
+
+	if (
+		mediaType !== "movie" &&
+		mediaType !== "show" &&
+		mediaType !== "season" &&
+		mediaType !== "episode"
+	) {
+		return null;
+	}
+
+	const sectionId = Number(raw.section_id ?? 0);
+	const sectionName = raw.section_name ?? raw.library_name ?? "Unknown";
+
+	return {
+		rating_key: String(ratingKey),
+		media_type: mediaType,
+		title: raw.title ?? "",
+		parent_rating_key: raw.parent_rating_key ?? null,
+		parent_title: raw.parent_title ?? null,
+		grandparent_rating_key: raw.grandparent_rating_key ?? null,
+		grandparent_title: raw.grandparent_title ?? null,
+		file: raw.file ?? null,
+		size: null,
+		added_at: raw.added_at ? Number(raw.added_at) : null,
+		last_played: raw.last_played ? Number(raw.last_played) : null,
+		play_count: raw.play_count ? Number(raw.play_count) : null,
+		media_index: raw.media_index ? Number(raw.media_index) : null,
+		season_index: raw.season_index ? Number(raw.season_index) : null,
+		section_id: Number.isFinite(sectionId) ? sectionId : 0,
+		section_name: sectionName,
+		year: raw.year ? Number(raw.year) : null,
+	};
+}
+
 function unwrapMetadataPayload(payload: unknown): unknown {
 	if (!payload || typeof payload !== "object") {
 		return payload;
@@ -401,4 +469,27 @@ function safeStringify(value: unknown, maxLength = 500): string {
 	} catch {
 		return "[unserializable payload]";
 	}
+}
+interface ChildrenMetadataResponse {
+	children_list?: RawChildItem[] | null;
+}
+
+interface RawChildItem {
+	rating_key?: string | number | null;
+	media_type?: string | null;
+	title?: string | null;
+	parent_rating_key?: string | null;
+	parent_title?: string | null;
+	grandparent_rating_key?: string | null;
+	grandparent_title?: string | null;
+	section_id?: string | number | null;
+	section_name?: string | null;
+	library_name?: string | null;
+	added_at?: number | string | null;
+	last_played?: number | string | null;
+	play_count?: number | string | null;
+	media_index?: number | string | null;
+	season_index?: number | string | null;
+	year?: number | string | null;
+	file?: string | null;
 }

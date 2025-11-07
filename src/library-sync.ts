@@ -2,6 +2,8 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 
 import { aggregateMediaUnits } from "./aggregation.ts";
+import { EpisodeCache } from "./episode-cache.ts";
+import { EpisodeFetcher } from "./episode-fetcher.ts";
 import { TautulliClient, type TautulliMediaItem } from "./tautulli-client.ts";
 import type { AppConfig, MediaSource, MediaUnit } from "./types.ts";
 
@@ -44,6 +46,10 @@ export async function syncMediaUnits(
 	const client = new TautulliClient(
 		config.tautulli,
 		options.verbose ? (message) => console.error(message) : undefined,
+	);
+	const episodeCache = new EpisodeCache(config.cachePath);
+	const episodeFetcher = new EpisodeFetcher(client, episodeCache, (message) =>
+		console.error(message),
 	);
 	const libraries = await client.getLibraries();
 	const selectedLibraryIds =
@@ -141,11 +147,12 @@ export async function syncMediaUnits(
 			}
 		}
 
-		for (const item of items) {
+		const verboseLogging = options.verbose ?? false;
+		const processItem = async (item: TautulliMediaItem): Promise<void> => {
 			if (!isSupportedMediaType(item.media_type)) {
 				stats.skippedUnsupported += 1;
 				skippedUnsupported += 1;
-				continue;
+				return;
 			}
 
 			let filePath = item.file ?? null;
@@ -157,10 +164,7 @@ export async function syncMediaUnits(
 					);
 					if (resolvedPath) {
 						filePath = resolvedPath;
-						if (
-							options.verbose &&
-							metadataResolutionLogs < 5
-						) {
+						if (verboseLogging && metadataResolutionLogs < 5) {
 							console.error(
 								`    Resolved file via metadata for "${item.title}": ${resolvedPath}`,
 							);
@@ -169,15 +173,15 @@ export async function syncMediaUnits(
 					} else {
 						stats.metadataLookupFailures += 1;
 					}
-					} catch (error) {
-						stats.metadataLookupFailures += 1;
-						if (options.verbose) {
-							console.error(
-								`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
-									error instanceof Error ? error.message : String(error)
-								}`,
-							);
-						}
+				} catch (error) {
+					stats.metadataLookupFailures += 1;
+					if (verboseLogging) {
+						console.error(
+							`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						);
+					}
 				}
 			}
 
@@ -189,7 +193,7 @@ export async function syncMediaUnits(
 					);
 				}
 				skippedMissingFile += 1;
-				continue;
+				return;
 			}
 
 			if (!isPathAllowed(filePath, config.libraryPaths)) {
@@ -198,7 +202,7 @@ export async function syncMediaUnits(
 					stats.sampleOutsidePaths.push(filePath);
 				}
 				skippedDueToPath += 1;
-				continue;
+				return;
 			}
 
 			const fileStats = await safeStat(filePath);
@@ -208,7 +212,7 @@ export async function syncMediaUnits(
 					stats.sampleMissingFiles.push(filePath);
 				}
 				skippedMissingFile += 1;
-				continue;
+				return;
 			}
 
 			const source = mapMediaItemToSource(
@@ -219,6 +223,29 @@ export async function syncMediaUnits(
 			);
 			sources.push(source);
 			stats.imported += 1;
+		};
+
+		const totalShows =
+			library.section_type === "show"
+				? items.filter((item) => item.media_type === "show").length
+				: 0;
+		let processedShows = 0;
+
+		for (const item of items) {
+			if (library.section_type === "show" && item.media_type === "show") {
+				processedShows += 1;
+				const episodes = await episodeFetcher.fetchEpisodesForShow(item, {
+					libraryName: library.section_name,
+					showIndex: processedShows,
+					totalShows,
+				});
+				for (const episode of episodes) {
+					await processItem(episode);
+				}
+				continue;
+			}
+
+			await processItem(item);
 		}
 
 		libraryStats.push(stats);

@@ -1,6 +1,7 @@
 import inquirer from "inquirer";
 
 import { loadOrCreateConfig, saveConfig } from "./config.ts";
+import { EpisodeCache } from "./episode-cache.ts";
 import { syncMediaUnits } from "./library-sync.ts";
 import { generateSampleMedia } from "./sample-data.ts";
 import { defaultWeights, scoreMediaItems } from "./scoring.ts";
@@ -329,6 +330,8 @@ async function dropStaleEntries(
 		options,
 	);
 	const verbose = options.verbose;
+	const episodeCache = new EpisodeCache(config.cachePath);
+	episodeCache.clear();
 	const client = new TautulliClient(
 		config.tautulli,
 		verbose ? (message) => console.error(message) : undefined,
