@@ -43,7 +43,7 @@ export async function syncMediaUnits(
 
 	const client = new TautulliClient(
 		config.tautulli,
-		options.verbose ? (message) => console.log(message) : undefined,
+		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const libraries = await client.getLibraries();
 	const selectedLibraryIds =
@@ -58,7 +58,7 @@ export async function syncMediaUnits(
 	const libraryStats: LibraryProcessingStats[] = [];
 
 	if (options.verbose) {
-		console.log(
+		console.error(
 			`Configured library roots: ${
 				config.libraryPaths.length
 					? config.libraryPaths.map((root) => `"${root}"`).join(", ")
@@ -69,23 +69,23 @@ export async function syncMediaUnits(
 
 	if (options.verbose) {
 		if (libraries.length === 0) {
-			console.log(
+			console.error(
 				"Tautulli returned no libraries. Verify the API key and permissions.",
 			);
 			try {
 				const info = await client.getServerInfo();
-				console.log(
+				console.error(
 					`Tautulli server info: ${JSON.stringify(info, null, 2)}`,
 				);
 			} catch (error) {
-				console.log(
+				console.error(
 					`Unable to fetch server info, check connectivity and API key. Error: ${
 						error instanceof Error ? error.message : String(error)
 					}`,
 				);
 			}
 		} else {
-			console.log(
+			console.error(
 				`Discovered ${libraries.length} libraries: ${libraries
 					.map((library) => `"${library.section_name}" (#${library.section_id})`)
 					.join(", ")}`,
@@ -96,7 +96,7 @@ export async function syncMediaUnits(
 	for (const library of libraries) {
 		if (selectedLibraryIds && !selectedLibraryIds.has(library.section_id)) {
 			if (options.verbose) {
-				console.log(
+				console.error(
 					`Skipping library ${library.section_name} (${library.section_id}) because it is not in the filter list.`,
 				);
 			}
@@ -104,7 +104,7 @@ export async function syncMediaUnits(
 		}
 
 		if (options.verbose) {
-			console.log(
+			console.error(
 				`Fetching media info for library ${library.section_name} (${library.section_id})`,
 			);
 		}
@@ -133,7 +133,7 @@ export async function syncMediaUnits(
 					rawPreview.length > 800
 						? `${rawPreview.slice(0, 800)} … (truncated)`
 						: rawPreview;
-				console.log(
+				console.error(
 					`  Sample raw item: keys=${Object.keys(firstItem).join(", ")}\n${truncatedPreview}`,
 				);
 			}
@@ -159,7 +159,7 @@ export async function syncMediaUnits(
 							options.verbose &&
 							metadataResolutionLogs < 5
 						) {
-							console.log(
+							console.error(
 								`    Resolved file via metadata for "${item.title}": ${resolvedPath}`,
 							);
 						}
@@ -167,15 +167,15 @@ export async function syncMediaUnits(
 					} else {
 						stats.metadataLookupFailures += 1;
 					}
-				} catch (error) {
-					stats.metadataLookupFailures += 1;
-					if (options.verbose) {
-						console.log(
-							`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
-								error instanceof Error ? error.message : String(error)
-							}`,
-						);
-					}
+					} catch (error) {
+						stats.metadataLookupFailures += 1;
+						if (options.verbose) {
+							console.error(
+								`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
+									error instanceof Error ? error.message : String(error)
+								}`,
+							);
+						}
 				}
 			}
 
@@ -221,7 +221,7 @@ export async function syncMediaUnits(
 
 		libraryStats.push(stats);
 		if (options.verbose) {
-			console.log(
+			console.error(
 				[
 					`Processed library "${stats.libraryName}" (${stats.libraryId})`,
 					`fetched ${stats.fetched}`,
@@ -246,22 +246,22 @@ export async function syncMediaUnits(
 					.join(", "),
 			);
 			if (stats.sampleOutsidePaths.length) {
-				console.log(
+				console.error(
 					`  Sample outside-path file: ${stats.sampleOutsidePaths.join(", ")}`,
 				);
 			}
 			if (stats.sampleMissingFiles.length) {
-				console.log(
+				console.error(
 					`  Sample missing/unreadable entry: ${stats.sampleMissingFiles.join(", ")}`,
 				);
 			}
 			if (!stats.imported && stats.fetched > 0) {
-				console.log(
+				console.error(
 					"  No items imported from this library. Check path configuration and filesystem access.",
 				);
 			}
 			if (stats.fetched === 0) {
-				console.log(
+				console.error(
 					"  Library returned zero items from Tautulli. Confirm the library is enabled in Tautulli.",
 				);
 			}
@@ -271,7 +271,7 @@ export async function syncMediaUnits(
 	const units = aggregateMediaUnits(sources);
 
 	if (options.verbose) {
-		console.log(
+		console.error(
 			`Imported ${sources.length} source files into ${units.length} media units.`,
 		);
 		const totalMetadataLookups = libraryStats.reduce(
@@ -283,25 +283,27 @@ export async function syncMediaUnits(
 			0,
 		);
 		if (totalMetadataLookups) {
-			console.log(
+			console.error(
 				`Performed ${totalMetadataLookups} metadata lookups (${totalMetadataFailures} failed).`,
 			);
 		}
 		if (skippedUnsupported) {
-			console.log(`Skipped ${skippedUnsupported} items with unsupported types.`);
+			console.error(
+				`Skipped ${skippedUnsupported} items with unsupported types.`,
+			);
 		}
 		if (skippedMissingFile) {
-			console.log(
+			console.error(
 				`Skipped ${skippedMissingFile} items missing files or unreadable on disk.`,
 			);
 		}
 		if (skippedDueToPath) {
-			console.log(
+			console.error(
 				`Skipped ${skippedDueToPath} items outside configured library paths.`,
 			);
 		}
 		if (!sources.length) {
-			console.log(
+			console.error(
 				"No source files were accepted. Check that your configured library paths match the media file locations and that the container has those paths mounted.",
 			);
 		}
