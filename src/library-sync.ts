@@ -109,7 +109,9 @@ export async function syncMediaUnits(
 			);
 		}
 
-		const items = await client.getLibraryMediaItems(library.section_id);
+		const items = await client.getLibraryMediaItems(library.section_id, {
+			sectionType: library.section_type,
+		});
 		const stats: LibraryProcessingStats = {
 			libraryName: library.section_name,
 			libraryId: library.section_id,

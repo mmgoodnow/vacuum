@@ -353,6 +353,7 @@ async function dropStaleEntries(
 			}
 			await client.getLibraryMediaItems(library.section_id, {
 				refresh: true,
+				sectionType: library.section_type,
 			});
 			if (verbose) {
 				console.error("  Refreshed from Plex.");

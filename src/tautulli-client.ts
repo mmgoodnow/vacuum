@@ -61,6 +61,7 @@ interface LibraryMediaResponse {
 
 interface LibraryMediaOptions {
 	refresh?: boolean;
+	sectionType?: string;
 }
 
 export class TautulliClient {
@@ -111,6 +112,8 @@ export class TautulliClient {
 					order_dir: "asc",
 					include: "file",
 					media_info: 1,
+					grouping: options.sectionType === "show" ? 0 : undefined,
+					children: options.sectionType === "show" ? 1 : undefined,
 					refresh: options.refresh ? "true" : undefined,
 				},
 			);
