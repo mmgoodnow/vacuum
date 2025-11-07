@@ -10,11 +10,13 @@ import type { AppConfig, ScoredMediaUnit, WeightConfig } from "./types.ts";
 interface RunOptions {
 	verbose: boolean;
 	output: "table" | "tsv";
+	perLibrary: boolean;
 }
 
 const DEFAULT_RUN_OPTIONS: RunOptions = {
 	verbose: false,
 	output: "table",
+	perLibrary: false,
 };
 
 async function main(): Promise<void> {
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
 		...DEFAULT_RUN_OPTIONS,
 		verbose: hasFlag(flags, "--verbose", "-v"),
 		output: hasFlag(flags, "--tsv") ? "tsv" : "table",
+		perLibrary: hasFlag(flags, "--per-library"),
 	};
 
 	logInfo("🧹 Vacuum — Plex library space recovery helper", runOptions);
@@ -172,6 +175,7 @@ Commands:
 Options:
   -v, --verbose   Enable detailed logging for supported commands.
       --tsv       Output full rankings as tab-separated values.
+      --per-library  Group output by library (tables show top 25 each; TSV adds library_rank).
 
 With no command, the interactive menu launches as before.`);
 }
@@ -211,9 +215,10 @@ function printScoredTable(items: ScoredMediaUnit[]): void {
 	console.table(rows);
 }
 
-function printScoredTsv(items: ScoredMediaUnit[]): void {
+function printScoredTsv(items: ScoredMediaUnit[], options: RunOptions): void {
 	const headers = [
 		"rank",
+		...(options.perLibrary ? ["library_rank"] : []),
 		"kind",
 		"title",
 		"section",
@@ -227,9 +232,16 @@ function printScoredTsv(items: ScoredMediaUnit[]): void {
 	];
 	console.log(headers.join("\t"));
 
+	const libraryRanks = new Map<string, number>();
+
 	items.forEach((item, index) => {
+		const libraryKey = `${item.librarySectionId}`;
+		const currentRank = (libraryRanks.get(libraryKey) ?? 0) + 1;
+		libraryRanks.set(libraryKey, currentRank);
+
 		const row = [
 			String(index + 1),
+			...(options.perLibrary ? [String(currentRank)] : []),
 			item.kind,
 			item.title,
 			item.librarySectionName,
@@ -270,7 +282,9 @@ async function syncAndRank(
 		});
 
 		if (options.output === "tsv") {
-			printScoredTsv(scored);
+			printScoredTsv(scored, options);
+		} else if (options.perLibrary) {
+			printPerLibraryTables(scored, options);
 		} else {
 			printScoredTable(scored.slice(0, 25));
 		}
@@ -412,6 +426,38 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 	return updatedConfig;
 }
 
+function printPerLibraryTables(
+	items: ScoredMediaUnit[],
+	options: RunOptions,
+): void {
+	const grouped = groupByLibrary(items);
+	for (const [sectionId, sectionItems] of grouped) {
+		const sample = sectionItems[0];
+		const sectionName = sample?.librarySectionName ?? sectionId;
+		logInfo(`\nSection: ${sectionName}`, options);
+		printScoredTable(sectionItems.slice(0, 25));
+	}
+}
+
+function groupByLibrary(
+	items: ScoredMediaUnit[],
+): Map<string, ScoredMediaUnit[]> {
+	const map = new Map<string, ScoredMediaUnit[]>();
+	for (const item of items) {
+		const key = `${item.librarySectionId}`;
+		const bucket = map.get(key);
+		if (bucket) {
+			bucket.push(item);
+		} else {
+			map.set(key, [item]);
+		}
+	}
+	for (const bucket of map.values()) {
+		bucket.sort((a, b) => b.score - a.score);
+	}
+	return map;
+}
+
 async function promptForWeights(current: WeightConfig): Promise<WeightConfig> {
 	const answers = await inquirer.prompt([
 		{
@@ -465,7 +511,7 @@ function formatNumber(value: number, digits: number): string {
 	return Number.isFinite(value) ? value.toFixed(digits) : "—";
 }
 
-await main().catch((error) => {
+main().catch((error) => {
 	console.error(error);
 	process.exitCode = 1;
 });
