@@ -26,24 +26,31 @@ export class EpisodeFetcher {
 		show: TautulliMediaItem,
 		context: FetchContext,
 	): Promise<TautulliMediaItem[]> {
+		const logFn = this.logger ?? ((message: string) => console.error(message));
+
 		const showKey = show.rating_key;
+		if (context.showIndex === 1) {
+			logFn(
+				`[TV] Processing ${context.totalShows} show(s) in "${context.libraryName}"...`,
+			);
+		}
 		const showUpdatedAt = this.getUpdateToken(show);
 		const log = this.logger ?? ((message: string) => console.error(message));
 
 		const cached = this.cache.load(showKey, showUpdatedAt);
 		if (cached) {
-			log(
+			logFn(
 				`[TV] Cache hit for "${show.title}" (${context.showIndex}/${context.totalShows})`,
 			);
 			return cached.map((episode) => this.toMediaItem(episode));
 		}
 
-		log(
+		logFn(
 			`[TV] Fetching episodes for "${show.title}" (${context.showIndex}/${context.totalShows})`,
 		);
 
 		const seasons = await this.client.getChildrenMetadata(show.rating_key, "show");
-		log(
+		logFn(
 			`[TV] "${show.title}" has ${seasons.length} season(s); crawling episodes...`,
 		);
 
@@ -57,7 +64,7 @@ export class EpisodeFetcher {
 			const seasonLabel =
 				season.title ??
 				(season.media_index ? `Season ${season.media_index}` : `Season #${processedSeasons}`);
-			log(
+			logFn(
 				`[TV]   → ${seasonLabel}: fetching episode metadata (${processedSeasons}/${seasons.length})`,
 			);
 			const seasonEpisodes = await this.client.getChildrenMetadata(season.rating_key, "season");
@@ -92,7 +99,7 @@ export class EpisodeFetcher {
 		}
 
 		this.cache.save(showKey, showUpdatedAt, episodes);
-		log(
+		logFn(
 			`[TV] Completed "${show.title}" — cached ${episodes.length} episode(s).`,
 		);
 
