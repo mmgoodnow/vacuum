@@ -65,6 +65,10 @@ interface LibraryMediaOptions {
 	sectionType?: string;
 }
 
+interface MetadataDetailsResponse {
+	metadata?: Array<{ view_count?: number | null }>;
+}
+
 export class TautulliClient {
 	private readonly baseUrl: string;
 	private readonly apiKey: string;
@@ -192,6 +196,29 @@ export class TautulliClient {
 		} catch (error) {
 			this.metadataFileCache.set(ratingKey, null);
 			throw error;
+		}
+	}
+
+	async getEpisodePlayCount(ratingKey: string): Promise<number | null> {
+		try {
+			const data = await this.request<MetadataDetailsResponse>(
+				"get_metadata",
+				{
+					rating_key: ratingKey,
+				},
+			);
+			const metadata = Array.isArray(data.metadata) ? data.metadata[0] : null;
+			if (metadata && metadata.view_count !== undefined && metadata.view_count !== null) {
+				return Number(metadata.view_count);
+			}
+			return null;
+		} catch (error) {
+			this.log?.(
+				`[Tautulli] Failed to get view count for ${ratingKey}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			return null;
 		}
 	}
 

@@ -82,6 +82,11 @@ export class EpisodeFetcher {
 				const filePath = await this.client.getMediaItemFilePath(
 					episode.rating_key,
 				);
+				let playCount = episode.play_count ?? null;
+				if (playCount === null || playCount === undefined) {
+					const lookedUp = await this.client.getEpisodePlayCount(episode.rating_key);
+					playCount = lookedUp ?? null;
+				}
 				const cachedEpisode: CachedEpisode = {
 					rating_key: episode.rating_key,
 					media_type: "episode",
@@ -93,7 +98,7 @@ export class EpisodeFetcher {
 					file: filePath ?? episode.file ?? null,
 					added_at: episode.added_at ?? null,
 					last_played: episode.last_played ?? null,
-					play_count: episode.play_count ?? null,
+					play_count: playCount ?? null,
 					media_index: episode.media_index ?? null,
 					season_index: episode.season_index ?? null,
 					section_id: episode.section_id,
