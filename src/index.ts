@@ -199,10 +199,17 @@ function printScoredTable(items: ScoredMediaUnit[]): void {
 		return;
 	}
 
+	const formatTitle = (item: ScoredMediaUnit): string => {
+		if (item.kind === "season" && item.parentTitle) {
+			return `${item.parentTitle} — ${item.title}`;
+		}
+		return item.title;
+	};
+
 	const rows = items.map((item, index) => ({
 		"#": index + 1,
 		Kind: item.kind === "movie" ? "🎬" : "📺",
-		Title: item.title,
+		Title: formatTitle(item),
 		Section: item.librarySectionName,
 		"Size (GB)": formatNumber(item.sizeBytes / 1024 ** 3, 2),
 		"Age (years)": formatNumber(item.metrics.ageYears, 1),
@@ -235,6 +242,13 @@ function printScoredTsv(items: ScoredMediaUnit[], options: RunOptions): void {
 
 	const libraryRanks = new Map<string, number>();
 
+	const formatTitle = (item: ScoredMediaUnit): string => {
+		if (item.kind === "season" && item.parentTitle) {
+			return `${item.parentTitle} — ${item.title}`;
+		}
+		return item.title;
+	};
+
 	items.forEach((item, index) => {
 		const libraryKey = `${item.librarySectionId}`;
 		const currentRank = (libraryRanks.get(libraryKey) ?? 0) + 1;
@@ -244,7 +258,7 @@ function printScoredTsv(items: ScoredMediaUnit[], options: RunOptions): void {
 			String(index + 1),
 			...(options.perLibrary ? [String(currentRank)] : []),
 			item.kind,
-			item.title,
+			formatTitle(item),
 			item.librarySectionName,
 			formatNumber(item.sizeBytes / 1024 ** 3, 2),
 			formatNumber(item.metrics.ageYears, 1),
