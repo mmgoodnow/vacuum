@@ -50,12 +50,15 @@ export async function syncMediaUnits(
 		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const episodeCache = new EpisodeCache(config.cachePath);
-	const metadataProgress = new ProgressReporter({ label: "Getting metadata" });
 	const episodeFetcher = new EpisodeFetcher(
 		client,
 		episodeCache,
 		options.verbose ? (message) => console.error(message) : undefined,
 	);
+	const metadataProgress = new ProgressReporter({
+		label: "Getting metadata",
+		stream: process.stderr,
+	});
 	const libraries = await client.getLibraries();
 	const selectedLibraryIds =
 		options.libraryFilterIds && options.libraryFilterIds.length > 0
@@ -137,6 +140,9 @@ export async function syncMediaUnits(
 			metadataLookupFailures: 0,
 		};
 		let metadataResolutionLogs = 0;
+		const initialMetadataBudget =
+			items.length > 0 ? Math.max(1, Math.floor(items.length * 0.5)) : undefined;
+		metadataProgress.setExpectedTotal(initialMetadataBudget);
 
 		if (options.verbose && items.length > 0) {
 			const [firstItem] = items;
@@ -162,6 +168,11 @@ export async function syncMediaUnits(
 
 			let filePath = item.file ?? null;
 			if (!filePath || filePath.length === 0) {
+				if (stats.metadataLookups === initialMetadataBudget) {
+					metadataProgress.setExpectedTotal(
+						stats.metadataLookups + 1 + (items.length - stats.metadataLookups),
+					);
+				}
 				stats.metadataLookups += 1;
 				metadataProgress.start(item.title);
 				try {
