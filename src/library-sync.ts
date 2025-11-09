@@ -1,9 +1,11 @@
 import { stat } from "node:fs/promises";
+import process from "node:process";
 import path from "node:path";
 
 import { aggregateMediaUnits } from "./aggregation.ts";
 import { EpisodeCache } from "./episode-cache.ts";
 import { EpisodeFetcher } from "./episode-fetcher.ts";
+import { ProgressReporter } from "./progress-reporter.ts";
 import { TautulliClient, type TautulliMediaItem } from "./tautulli-client.ts";
 import type { AppConfig, MediaSource, MediaUnit } from "./types.ts";
 
@@ -48,8 +50,11 @@ export async function syncMediaUnits(
 		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const episodeCache = new EpisodeCache(config.cachePath);
-	const episodeFetcher = new EpisodeFetcher(client, episodeCache, (message) =>
-		console.error(message),
+	const metadataProgress = new ProgressReporter({ label: "Getting metadata" });
+	const episodeFetcher = new EpisodeFetcher(
+		client,
+		episodeCache,
+		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const libraries = await client.getLibraries();
 	const selectedLibraryIds =
@@ -158,6 +163,7 @@ export async function syncMediaUnits(
 			let filePath = item.file ?? null;
 			if (!filePath || filePath.length === 0) {
 				stats.metadataLookups += 1;
+				metadataProgress.start(item.title);
 				try {
 					const resolvedPath = await client.getMediaItemFilePath(
 						item.rating_key,
@@ -182,6 +188,8 @@ export async function syncMediaUnits(
 							}`,
 						);
 					}
+				} finally {
+					metadataProgress.finish(item.title);
 				}
 			}
 
@@ -230,15 +238,32 @@ export async function syncMediaUnits(
 				? items.filter((item) => item.media_type === "show").length
 				: 0;
 		let processedShows = 0;
+		let showProgress: ProgressReporter | null = null;
+		if (totalShows > 0) {
+			console.error(
+				`[TV] Processing ${totalShows} show(s) in "${library.section_name}"...`,
+			);
+			showProgress = new ProgressReporter({
+				label: `Processing ${library.section_name}`,
+			});
+			showProgress.setExpectedTotal(totalShows);
+		}
 
 		for (const item of items) {
 			if (library.section_type === "show" && item.media_type === "show") {
 				processedShows += 1;
-				const episodes = await episodeFetcher.fetchEpisodesForShow(item, {
-					libraryName: library.section_name,
-					showIndex: processedShows,
-					totalShows,
-				});
+				const episodes = await episodeFetcher.fetchEpisodesForShow(
+					item,
+					{
+						libraryName: library.section_name,
+						showIndex: processedShows,
+						totalShows,
+					},
+					{
+						...(showProgress ? { progress: showProgress } : {}),
+						verbose: options.verbose ?? false,
+					},
+				);
 				for (const episode of episodes) {
 					await processItem(episode);
 				}
@@ -247,6 +272,9 @@ export async function syncMediaUnits(
 
 			await processItem(item);
 		}
+
+		metadataProgress.end();
+		showProgress?.end();
 
 		libraryStats.push(stats);
 		if (options.verbose) {

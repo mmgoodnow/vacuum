@@ -1,10 +1,16 @@
 import type { TautulliMediaItem, TautulliClient } from "./tautulli-client.ts";
 import { EpisodeCache, type CachedEpisode } from "./episode-cache.ts";
+import { ProgressReporter } from "./progress-reporter.ts";
 
 interface FetchContext {
 	libraryName: string;
 	showIndex: number;
 	totalShows: number;
+}
+
+interface FetchOptions {
+	progress?: ProgressReporter;
+	verbose?: boolean;
 }
 
 export class EpisodeFetcher {
@@ -25,32 +31,32 @@ export class EpisodeFetcher {
 	async fetchEpisodesForShow(
 		show: TautulliMediaItem,
 		context: FetchContext,
+		options: FetchOptions = {},
 	): Promise<TautulliMediaItem[]> {
-		const logFn = this.logger ?? ((message: string) => console.error(message));
+		const logFn = options.verbose
+			? this.logger ?? ((message: string) => console.error(message))
+			: undefined;
+		const progress = options.progress;
 
 		const showKey = show.rating_key;
-		if (context.showIndex === 1) {
-			logFn(
-				`[TV] Processing ${context.totalShows} show(s) in "${context.libraryName}"...`,
-			);
-		}
+		progress?.start(show.title);
 		const showUpdatedAt = this.getUpdateToken(show);
-		const log = this.logger ?? ((message: string) => console.error(message));
 
 		const cached = this.cache.load(showKey, showUpdatedAt);
-		if (cached) {
-			logFn(
-				`[TV] Cache hit for "${show.title}" (${context.showIndex}/${context.totalShows})`,
-			);
-			return cached.map((episode) => this.toMediaItem(episode));
-		}
+		try {
+			if (cached) {
+				logFn?.(
+					`[TV] Cache hit for "${show.title}" (${context.showIndex}/${context.totalShows})`,
+				);
+				return cached.map((episode) => this.toMediaItem(episode));
+			}
 
-		logFn(
-			`[TV] Fetching episodes for "${show.title}" (${context.showIndex}/${context.totalShows})`,
-		);
+			logFn?.(
+				`[TV] Fetching episodes for "${show.title}" (${context.showIndex}/${context.totalShows})`,
+			);
 
 		const seasons = await this.client.getChildrenMetadata(show.rating_key, "show");
-		logFn(
+		logFn?.(
 			`[TV] "${show.title}" has ${seasons.length} season(s); crawling episodes...`,
 		);
 
@@ -64,7 +70,7 @@ export class EpisodeFetcher {
 			const seasonLabel =
 				season.title ??
 				(season.media_index ? `Season ${season.media_index}` : `Season #${processedSeasons}`);
-			logFn(
+			logFn?.(
 				`[TV]   → ${seasonLabel}: fetching episode metadata (${processedSeasons}/${seasons.length})`,
 			);
 			const seasonEpisodes = await this.client.getChildrenMetadata(season.rating_key, "season");
@@ -98,12 +104,14 @@ export class EpisodeFetcher {
 			}
 		}
 
-		this.cache.save(showKey, showUpdatedAt, episodes);
-		logFn(
-			`[TV] Completed "${show.title}" — cached ${episodes.length} episode(s).`,
-		);
-
-		return episodes.map((episode) => this.toMediaItem(episode));
+			this.cache.save(showKey, showUpdatedAt, episodes);
+			logFn?.(
+				`[TV] Completed "${show.title}" — cached ${episodes.length} episode(s).`,
+			);
+			return episodes.map((episode) => this.toMediaItem(episode));
+		} finally {
+			progress?.finish(show.title);
+		}
 	}
 
 	private getUpdateToken(item: TautulliMediaItem): number {
