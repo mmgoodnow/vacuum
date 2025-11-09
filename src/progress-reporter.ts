@@ -31,8 +31,7 @@ export class ProgressReporter {
 	start(text: string): void {
 		this.totalStarted += 1;
 		this.lastText = text;
-		const currentIndex = this.completed + 1;
-		this.render(currentIndex, text, false);
+		this.render(this.completed, text, false);
 	}
 
 	finish(text?: string): void {
