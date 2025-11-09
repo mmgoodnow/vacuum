@@ -48,10 +48,14 @@ export function scoreMediaItems(
 				metrics.ageScore * weights.ageWeight +
 				metrics.watchScarcityScore * weights.watchWeight;
 
+			const isProtectedSeason = isFirstSeasonUnit(item);
+			const adjustedScore = isProtectedSeason ? Number.NEGATIVE_INFINITY : score;
+
 			return {
 				...item,
 				metrics,
-				score,
+				score: adjustedScore,
+				isProtectedSeason,
 			};
 		})
 		.sort((a, b) => b.score - a.score);
@@ -162,4 +166,12 @@ function computeWatchScarcity({
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max);
+}
+
+function isFirstSeasonUnit(item: MediaUnit): boolean {
+	if (item.kind !== "season") {
+		return false;
+	}
+	const normalized = item.title.trim().toLowerCase();
+	return /^(season|series)\s*0*1(\b|$)/i.test(normalized);
 }

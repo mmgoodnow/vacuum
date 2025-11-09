@@ -68,4 +68,5 @@ export interface ScoringMetrics {
 export interface ScoredMediaUnit extends MediaUnit {
 	score: number;
 	metrics: ScoringMetrics;
+	isProtectedSeason?: boolean;
 }
