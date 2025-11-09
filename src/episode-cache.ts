@@ -27,7 +27,7 @@ interface CacheRow {
 	payload: string;
 }
 
-const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6 hours
+const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 
 export class EpisodeCache {
 	private readonly db: DatabaseSync;
