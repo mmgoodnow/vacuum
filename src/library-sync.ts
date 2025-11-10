@@ -140,9 +140,7 @@ export async function syncMediaUnits(
 			metadataLookupFailures: 0,
 		};
 		let metadataResolutionLogs = 0;
-		const initialMetadataBudget =
-			items.length > 0 ? Math.max(1, Math.floor(items.length * 0.5)) : undefined;
-		metadataProgress.setExpectedTotal(initialMetadataBudget);
+		metadataProgress.setExpectedTotal(items.length || undefined);
 
 		if (options.verbose && items.length > 0) {
 			const [firstItem] = items;
@@ -168,11 +166,6 @@ export async function syncMediaUnits(
 
 			let filePath = item.file ?? null;
 			if (!filePath || filePath.length === 0) {
-				if (stats.metadataLookups === initialMetadataBudget) {
-					metadataProgress.setExpectedTotal(
-						stats.metadataLookups + 1 + (items.length - stats.metadataLookups),
-					);
-				}
 				stats.metadataLookups += 1;
 				metadataProgress.start(item.title);
 				try {
@@ -432,15 +425,15 @@ function mapMediaItemToSource(
 		fromUnixSeconds(item.added_at ?? null) ?? new Date(fileStats.birthtimeMs);
 	const lastPlayedAt = fromUnixSeconds(item.last_played ?? null);
 
-	return {
-		id: item.rating_key,
-		title: item.title,
-		relativePath: null,
-		path: filePath,
-		sizeBytes: fileStats.size,
-		addedAt,
-		lastPlayedAt,
-		playCount: item.play_count ?? 0,
+return {
+	id: item.rating_key,
+	title: item.title,
+	relativePath: null,
+	path: filePath,
+	sizeBytes: fileStats.size,
+	addedAt,
+	lastPlayedAt,
+	playCount: Number(item.play_count ?? 0) || 0,
 		librarySectionId: item.section_id,
 		librarySectionName,
 		episodeIndex: item.media_index ?? null,

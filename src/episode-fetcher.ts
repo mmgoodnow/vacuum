@@ -82,8 +82,8 @@ export class EpisodeFetcher {
 				const filePath = await this.client.getMediaItemFilePath(
 					episode.rating_key,
 				);
-				let playCount = episode.play_count ?? null;
-				if (playCount === null || playCount === undefined) {
+				let playCount = normalizePlayCount(episode.play_count);
+				if (playCount === null) {
 					const lookedUp = await this.client.getEpisodePlayCount(episode.rating_key);
 					playCount = lookedUp ?? null;
 				}
@@ -132,4 +132,12 @@ export class EpisodeFetcher {
 			section_name: episode.section_name,
 		};
 	}
+}
+
+function normalizePlayCount(value: number | string | null | undefined): number | null {
+	if (value === null || value === undefined) {
+		return null;
+	}
+	const num = Number(value);
+	return Number.isFinite(num) ? num : null;
 }
