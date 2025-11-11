@@ -135,9 +135,17 @@ export async function syncMediaUnits(
 			);
 		}
 
-		const items = await client.getLibraryMediaItems(library.section_id, {
-			sectionType: library.section_type,
-		});
+		const items = await client.getLibraryMediaItems(
+			library.section_id,
+			targetShowKey
+				? {
+						sectionType: library.section_type,
+						ratingKey: targetShowKey,
+					}
+				: {
+						sectionType: library.section_type,
+					},
+		);
 		const stats: LibraryProcessingStats = {
 			libraryName: library.section_name,
 			libraryId: library.section_id,
@@ -158,6 +166,11 @@ export async function syncMediaUnits(
 				: items;
 		metadataProgress.setExpectedTotal(itemsToProcess.length || undefined);
 		if (!itemsToProcess.length) {
+			if (targetShowKey) {
+				console.error(
+					`[TV] Rating key ${targetShowKey} not found in library "${library.section_name}".`,
+				);
+			}
 			continue;
 		}
 
