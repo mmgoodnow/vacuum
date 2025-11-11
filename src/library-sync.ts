@@ -154,7 +154,7 @@ export async function syncMediaUnits(
 		let metadataResolutionLogs = 0;
 		const itemsToProcess =
 			targetShowKey && library.section_type === "show"
-				? items.filter((item) => item.media_type === "show" && item.rating_key === targetShowKey)
+				? items.filter((item) => item.rating_key === targetShowKey)
 				: items;
 		metadataProgress.setExpectedTotal(itemsToProcess.length || undefined);
 		if (!itemsToProcess.length) {
