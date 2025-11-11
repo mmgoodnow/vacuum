@@ -104,7 +104,7 @@ export class TautulliClient {
 		sectionId: number,
 		options: LibraryMediaOptions = {},
 	): Promise<TautulliMediaItem[]> {
-		const items: TautulliMediaItem[] = [];
+	const items: TautulliMediaItem[] = [];
 		let start = 0;
 
 		while (true) {
@@ -120,7 +120,6 @@ export class TautulliClient {
 					media_info: 1,
 					grouping: options.sectionType === "show" ? 0 : undefined,
 					children: options.sectionType === "show" ? 1 : undefined,
-					rating_key: options.ratingKey,
 					refresh: options.refresh ? "true" : undefined,
 				},
 			);

@@ -135,17 +135,9 @@ export async function syncMediaUnits(
 			);
 		}
 
-		const items = await client.getLibraryMediaItems(
-			library.section_id,
-			targetShowKey
-				? {
-						sectionType: library.section_type,
-						ratingKey: targetShowKey,
-					}
-				: {
-						sectionType: library.section_type,
-					},
-		);
+		const items = await client.getLibraryMediaItems(library.section_id, {
+			sectionType: library.section_type,
+		});
 		const stats: LibraryProcessingStats = {
 			libraryName: library.section_name,
 			libraryId: library.section_id,
@@ -162,7 +154,18 @@ export async function syncMediaUnits(
 		let metadataResolutionLogs = 0;
 		const itemsToProcess =
 			targetShowKey && library.section_type === "show"
-				? items.filter((item) => item.rating_key === targetShowKey)
+				? items.filter((item) => {
+						if (item.media_type === "show") {
+							return item.rating_key === targetShowKey;
+						}
+						if (item.media_type === "season") {
+							return item.parent_rating_key === targetShowKey;
+						}
+						return (
+							item.parent_rating_key === targetShowKey ||
+							item.grandparent_rating_key === targetShowKey
+						);
+					})
 				: items;
 		metadataProgress.setExpectedTotal(itemsToProcess.length || undefined);
 		if (!itemsToProcess.length) {
