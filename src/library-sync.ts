@@ -12,6 +12,7 @@ import type { AppConfig, MediaSource, MediaUnit } from "./types.ts";
 export interface SyncOptions {
 	libraryFilterIds?: number[];
 	verbose?: boolean;
+	showRatingKey?: string;
 }
 
 export interface SyncResult {
@@ -50,6 +51,9 @@ export async function syncMediaUnits(
 		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const episodeCache = new EpisodeCache(config.cachePath);
+	const targetShowKey = options.showRatingKey ?? null;
+	let processedTargetShow = false;
+
 	const episodeFetcher = new EpisodeFetcher(
 		client,
 		episodeCache,
@@ -108,12 +112,20 @@ export async function syncMediaUnits(
 	}
 
 	for (const library of libraries) {
+		if (targetShowKey && processedTargetShow) {
+			break;
+		}
+
 		if (selectedLibraryIds && !selectedLibraryIds.has(library.section_id)) {
 			if (options.verbose) {
 				console.error(
 					`Skipping library ${library.section_name} (${library.section_id}) because it is not in the filter list.`,
 				);
 			}
+			continue;
+		}
+
+		if (targetShowKey && library.section_type !== "show") {
 			continue;
 		}
 
@@ -140,7 +152,14 @@ export async function syncMediaUnits(
 			metadataLookupFailures: 0,
 		};
 		let metadataResolutionLogs = 0;
-		metadataProgress.setExpectedTotal(items.length || undefined);
+		const itemsToProcess =
+			targetShowKey && library.section_type === "show"
+				? items.filter((item) => item.media_type === "show" && item.rating_key === targetShowKey)
+				: items;
+		metadataProgress.setExpectedTotal(itemsToProcess.length || undefined);
+		if (!itemsToProcess.length) {
+			continue;
+		}
 
 		if (options.verbose && items.length > 0) {
 			const [firstItem] = items;
@@ -158,83 +177,85 @@ export async function syncMediaUnits(
 
 		const verboseLogging = options.verbose ?? false;
 		const processItem = async (item: TautulliMediaItem): Promise<void> => {
-			if (!isSupportedMediaType(item.media_type)) {
-				stats.skippedUnsupported += 1;
-				skippedUnsupported += 1;
-				return;
-			}
+			metadataProgress.start(item.title);
+			try {
+				if (!isSupportedMediaType(item.media_type)) {
+					stats.skippedUnsupported += 1;
+					skippedUnsupported += 1;
+					return;
+				}
 
-			let filePath = item.file ?? null;
-			if (!filePath || filePath.length === 0) {
-				stats.metadataLookups += 1;
-				metadataProgress.start(item.title);
-				try {
-					const resolvedPath = await client.getMediaItemFilePath(
-						item.rating_key,
-					);
-					if (resolvedPath) {
-						filePath = resolvedPath;
-						if (verboseLogging && metadataResolutionLogs < 5) {
+				let filePath = item.file ?? null;
+				if (!filePath || filePath.length === 0) {
+					stats.metadataLookups += 1;
+					try {
+						const resolvedPath = await client.getMediaItemFilePath(
+							item.rating_key,
+						);
+						if (resolvedPath) {
+							filePath = resolvedPath;
+							if (verboseLogging && metadataResolutionLogs < 5) {
+								console.error(
+									`    Resolved file via metadata for "${item.title}": ${resolvedPath}`,
+								);
+							}
+							metadataResolutionLogs += 1;
+						} else {
+							stats.metadataLookupFailures += 1;
+						}
+					} catch (error) {
+						stats.metadataLookupFailures += 1;
+						if (verboseLogging) {
 							console.error(
-								`    Resolved file via metadata for "${item.title}": ${resolvedPath}`,
+								`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
+									error instanceof Error ? error.message : String(error)
+								}`,
 							);
 						}
-						metadataResolutionLogs += 1;
-					} else {
-						stats.metadataLookupFailures += 1;
 					}
-				} catch (error) {
-					stats.metadataLookupFailures += 1;
-					if (verboseLogging) {
-						console.error(
-							`    Failed to resolve file for "${item.title}" (${item.rating_key}): ${
-								error instanceof Error ? error.message : String(error)
-							}`,
+				}
+
+				if (!filePath) {
+					stats.skippedMissingFile += 1;
+					if (stats.sampleMissingFiles.length < 3) {
+						stats.sampleMissingFiles.push(
+							`${item.title} (${item.rating_key ?? "unknown key"})`,
 						);
 					}
-				} finally {
-					metadataProgress.finish(item.title);
+					skippedMissingFile += 1;
+					return;
 				}
-			}
 
-			if (!filePath) {
-				stats.skippedMissingFile += 1;
-				if (stats.sampleMissingFiles.length < 3) {
-					stats.sampleMissingFiles.push(
-						`${item.title} (${item.rating_key ?? "unknown key"})`,
-					);
+				if (!isPathAllowed(filePath, config.libraryPaths)) {
+					stats.skippedDueToPath += 1;
+					if (stats.sampleOutsidePaths.length < 3) {
+						stats.sampleOutsidePaths.push(filePath);
+					}
+					skippedDueToPath += 1;
+					return;
 				}
-				skippedMissingFile += 1;
-				return;
-			}
 
-			if (!isPathAllowed(filePath, config.libraryPaths)) {
-				stats.skippedDueToPath += 1;
-				if (stats.sampleOutsidePaths.length < 3) {
-					stats.sampleOutsidePaths.push(filePath);
+				const fileStats = await safeStat(filePath);
+				if (!fileStats) {
+					stats.skippedMissingFile += 1;
+					if (stats.sampleMissingFiles.length < 3) {
+						stats.sampleMissingFiles.push(filePath);
+					}
+					skippedMissingFile += 1;
+					return;
 				}
-				skippedDueToPath += 1;
-				return;
-			}
 
-			const fileStats = await safeStat(filePath);
-			if (!fileStats) {
-				stats.skippedMissingFile += 1;
-				if (stats.sampleMissingFiles.length < 3) {
-					stats.sampleMissingFiles.push(filePath);
-				}
-				skippedMissingFile += 1;
-				return;
+				const source = mapMediaItemToSource(
+					item,
+					library.section_name,
+					filePath,
+					fileStats,
+				);
+				sources.push(source);
+				stats.imported += 1;
+			} finally {
+				metadataProgress.finish(item.title);
 			}
-
-			const source = mapMediaItemToSource(
-				item,
-				library.section_name,
-				filePath,
-				fileStats,
-			);
-			sources.push(source);
-			stats.imported += 1;
 		};
 
 		const totalShows =
@@ -253,7 +274,7 @@ export async function syncMediaUnits(
 			showProgress.setExpectedTotal(totalShows);
 		}
 
-		for (const item of items) {
+		for (const item of itemsToProcess) {
 			if (library.section_type === "show" && item.media_type === "show") {
 				processedShows += 1;
 				const episodes = await episodeFetcher.fetchEpisodesForShow(
@@ -270,6 +291,9 @@ export async function syncMediaUnits(
 				);
 				for (const episode of episodes) {
 					await processItem(episode);
+				}
+				if (targetShowKey) {
+					processedTargetShow = true;
 				}
 				continue;
 			}

@@ -12,6 +12,7 @@ interface RunOptions {
 	verbose: boolean;
 	output: "table" | "tsv";
 	perLibrary: boolean;
+	showRatingKey?: string;
 }
 
 const DEFAULT_RUN_OPTIONS: RunOptions = {
@@ -22,12 +23,14 @@ const DEFAULT_RUN_OPTIONS: RunOptions = {
 
 async function main(): Promise<void> {
 	const cliArgs = process.argv.slice(2);
-	const { action: requestedAction, flags } = parseCliArgs(cliArgs);
+	const { action: requestedAction, flags, params } = parseCliArgs(cliArgs);
+	const showParam = params["show-rating-key"] ?? params.show;
 	const runOptions: RunOptions = {
 		...DEFAULT_RUN_OPTIONS,
 		verbose: hasFlag(flags, "--verbose", "-v"),
 		output: hasFlag(flags, "--tsv") ? "tsv" : "table",
 		perLibrary: hasFlag(flags, "--per-library"),
+		...(showParam ? { showRatingKey: showParam } : {}),
 	};
 
 	logInfo("🧹 Vacuum — Plex library space recovery helper", runOptions);
@@ -89,20 +92,46 @@ type MenuAction =
 
 function parseCliArgs(
 	args: string[],
-): { action: MenuAction; flags: Set<string> } {
+): { action: MenuAction; flags: Set<string>; params: Record<string, string> } {
 	let command: string | undefined;
 	const flags = new Set<string>();
+	const params: Record<string, string> = {};
 
-	for (const arg of args) {
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
 		if (!command && arg && !arg.startsWith("-")) {
 			command = arg;
-		} else if (arg) {
+			continue;
+		}
+
+		if (!arg) {
+			continue;
+		}
+
+		if (arg.startsWith("--")) {
+			const withoutPrefix = arg.slice(2);
+			const eqIndex = withoutPrefix.indexOf("=");
+			if (eqIndex !== -1) {
+				const name = withoutPrefix.slice(0, eqIndex);
+				const inlineValue = withoutPrefix.slice(eqIndex + 1);
+				params[name] = inlineValue;
+				continue;
+			}
+			const name = withoutPrefix;
+			const next = args[i + 1];
+			if (next && !next.startsWith("-")) {
+				params[name] = next;
+				i += 1;
+			} else {
+				flags.add(`--${name}`);
+			}
+		} else {
 			flags.add(arg);
 		}
 	}
 
 	const action = getCliAction(command);
-	return { action, flags };
+	return { action, flags, params };
 }
 
 function hasFlag(flags: Set<string>, ...aliases: string[]): boolean {
@@ -177,6 +206,7 @@ Options:
   -v, --verbose   Enable detailed logging for supported commands.
       --tsv       Output full rankings as tab-separated values.
       --per-library  Group output by library (tables show top 25 each; TSV adds library_rank).
+      --show <rating_key>  Limit sync to a single show (rating key from Plex/Tautulli).
 
 With no command, the interactive menu launches as before.`);
 }
@@ -286,7 +316,10 @@ async function syncAndRank(
 
 	logInfo("\nSyncing libraries via Tautulli...", options);
 	try {
-		const result = await syncMediaUnits(config, { verbose: options.verbose });
+		const result = await syncMediaUnits(config, {
+			verbose: options.verbose,
+			...(options.showRatingKey ? { showRatingKey: options.showRatingKey } : {}),
+		});
 		if (result.units.length === 0) {
 			console.log("No media items were discovered.");
 			return;
