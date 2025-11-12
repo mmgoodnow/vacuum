@@ -100,6 +100,10 @@ async function main(): Promise<void> {
 						name: "Select media to delete (interactive)",
 						value: "purge",
 					},
+					{
+						name: "Edit ignored titles",
+						value: "blocklist",
+					},
 					{ name: "Adjust scoring weights", value: "weights" },
 					{ name: "Edit configuration", value: "config" },
 					{
@@ -125,6 +129,7 @@ async function main(): Promise<void> {
 type MenuAction =
 	| "sync"
 	| "purge"
+	| "blocklist"
 	| "weights"
 	| "config"
 	| "prune"
@@ -184,6 +189,8 @@ function getCliAction(command?: string): MenuAction {
 	switch (command) {
 		case "sync":
 			return "sync";
+		case "blocklist":
+			return "blocklist";
 		case "weights":
 			return "weights";
 		case "config":
@@ -211,6 +218,8 @@ async function runAction(
 			return adjustWeights(config);
 		case "config":
 			return reconfigure(config);
+		case "blocklist":
+			return editBlockedTitles(config);
 		case "purge":
 			await purgeMediaUnits(config, options);
 			return config;
@@ -1095,6 +1104,36 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 
 	await saveConfig(updatedConfig);
 	console.log("Configuration updated.");
+	return updatedConfig;
+}
+
+async function editBlockedTitles(current: AppConfig): Promise<AppConfig> {
+	const defaultText =
+		current.blockedTitles.length > 0
+			? `${current.blockedTitles.join("\n")}\n`
+			: "";
+	const { blockedText } = await promptOrExit<{ blockedText: string }>([
+		{
+			type: "editor",
+			name: "blockedText",
+			message:
+				"Edit the list of blocked titles (one per line). Saved on editor exit.",
+			default: defaultText,
+		},
+	]);
+	const updatedList = blockedText
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+
+	const updatedConfig: AppConfig = {
+		...current,
+		blockedTitles: updatedList,
+	};
+	await saveConfig(updatedConfig);
+	console.log(
+		`Blocked titles updated (${updatedList.length} entr${updatedList.length === 1 ? "y" : "ies"}).`,
+	);
 	return updatedConfig;
 }
 
