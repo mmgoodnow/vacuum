@@ -5,7 +5,6 @@ import inquirer from "inquirer";
 import { loadOrCreateConfig, saveConfig } from "./config.ts";
 import { EpisodeCache } from "./episode-cache.ts";
 import { syncMediaUnits } from "./library-sync.ts";
-import { generateSampleMedia } from "./sample-data.ts";
 import { defaultWeights, scoreMediaItems } from "./scoring.ts";
 import {
 	RadarrClient,
@@ -96,7 +95,6 @@ async function main(): Promise<void> {
 					message: "What would you like to do?",
 				choices: [
 					{ name: "Sync libraries via Tautulli and rank", value: "sync" },
-					{ name: "Preview ranking with sample data", value: "preview" },
 					{
 						name: "Select media to delete (interactive)",
 						value: "purge",
@@ -125,7 +123,6 @@ async function main(): Promise<void> {
 
 type MenuAction =
 	| "sync"
-	| "preview"
 	| "purge"
 	| "weights"
 	| "config"
@@ -186,8 +183,6 @@ function getCliAction(command?: string): MenuAction {
 	switch (command) {
 		case "sync":
 			return "sync";
-		case "preview":
-			return "preview";
 		case "weights":
 			return "weights";
 		case "config":
@@ -208,9 +203,6 @@ async function runAction(
 	options: RunOptions,
 ): Promise<AppConfig> {
 	switch (action) {
-		case "preview":
-			await previewRanking(config);
-			return config;
 		case "sync":
 			await syncAndRank(config, options);
 			return config;
@@ -243,7 +235,6 @@ function printCliUsage(): void {
 
 Commands:
   sync        Run "Sync libraries via Tautulli" once and exit.
-  preview     Run the sample data preview and exit.
   purge       Interactive flow to select ranked items and delete their files.
   weights     Enter the weight adjustment workflow.
   config      Enter configuration editing.
@@ -257,18 +248,6 @@ Options:
       --show <rating_key>  Limit sync to a single show (rating key from Plex/Tautulli).
 
 With no command, the interactive menu launches as before.`);
-}
-
-async function previewRanking(config: AppConfig): Promise<void> {
-	const sampleItems = generateSampleMedia();
-	const scored = scoreMediaItems(sampleItems, {
-		weights: config.weights,
-	});
-
-	printScoredTable(scored.slice(0, 10));
-	console.log(
-		"\nTip: connect to Tautulli and your library paths to rank real items.",
-	);
 }
 
 function printScoredTable(items: ScoredMediaUnit[]): void {
