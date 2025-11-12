@@ -1018,7 +1018,6 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 		tautulliUrl: string;
 		tautulliApiKey: string;
 		libraryPaths: string[];
-		blockedTitles: string[];
 	}>([
 		{
 			type: "input",
@@ -1046,17 +1045,6 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 					.map((part) => part.trim())
 					.filter(Boolean),
 		},
-		{
-			type: "input",
-			name: "blockedTitles",
-			message: "Blocked titles (comma separated)",
-			default: current.blockedTitles.join(", "),
-			filter: (value: string) =>
-				value
-					.split(",")
-					.map((part) => part.trim())
-					.filter(Boolean),
-		},
 	]);
 
 	const sonarr = await promptForArrSettings("Sonarr", current.sonarr);
@@ -1074,7 +1062,7 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 		sonarr,
 		radarr,
 		libraryPaths: [...answers.libraryPaths],
-		blockedTitles: [...answers.blockedTitles],
+		blockedTitles: current.blockedTitles,
 	};
 
 	await saveConfig(updatedConfig);
@@ -1083,6 +1071,13 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 }
 
 async function editBlockedTitles(current: AppConfig): Promise<AppConfig> {
+	const editor = process.env.EDITOR ?? process.env.VISUAL ?? "";
+	if (!editor.trim()) {
+		console.error(
+			"Set the EDITOR (or VISUAL) environment variable to use this feature.",
+		);
+		return current;
+	}
 	const defaultText =
 		current.blockedTitles.length > 0
 			? `${current.blockedTitles.join("\n")}\n`

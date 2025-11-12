@@ -77,17 +77,6 @@ async function promptForInitialConfig(): Promise<AppConfig> {
 					.map((part) => part.trim())
 					.filter(Boolean),
 		},
-		{
-			type: "input",
-			name: "blockedTitles",
-			message:
-				"Titles to block from rankings (comma separated, optional)",
-			filter: (value: string) =>
-				value
-					.split(",")
-					.map((part) => part.trim())
-					.filter(Boolean),
-		},
 	]);
 
 	const sonarr = await promptForArrIntegration("Sonarr");
@@ -104,7 +93,7 @@ async function promptForInitialConfig(): Promise<AppConfig> {
 		sonarr,
 		radarr,
 		libraryPaths: answers.libraryPaths,
-		blockedTitles: answers.blockedTitles,
+		blockedTitles: [],
 		weights: defaultWeights,
 		cachePath: DEFAULT_CACHE_PATH,
 	});
