@@ -339,6 +339,40 @@ function printScoredTsv(items: ScoredMediaUnit[], options: RunOptions): void {
 	});
 }
 
+function shouldOfferInlinePurge(options: RunOptions): boolean {
+	if (options.output !== "table") {
+		return false;
+	}
+	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+		return false;
+	}
+	return true;
+}
+
+async function maybeOfferInlinePurge(
+	config: AppConfig,
+	options: RunOptions,
+	scored: ScoredMediaUnit[],
+): Promise<void> {
+	if (!scored.length || options.showRatingKey) {
+		return;
+	}
+	if (!shouldOfferInlinePurge(options)) {
+		return;
+	}
+	const { purgeNow } = await promptOrExit<{ purgeNow: boolean }>([
+		{
+			type: "confirm",
+			name: "purgeNow",
+			message: "Delete items now using these results?",
+			default: false,
+		},
+	]);
+	if (purgeNow) {
+		await purgeMediaUnits(config, options, scored);
+	}
+}
+
 async function syncAndRank(
 	config: AppConfig,
 	options: RunOptions = DEFAULT_RUN_OPTIONS,
@@ -389,6 +423,7 @@ async function syncAndRank(
 			`\nRanked ${result.units.length} units. Skipped ${result.skippedDueToPath} outside configured paths, ${result.skippedMissingFile} missing files.`,
 			options,
 		);
+		await maybeOfferInlinePurge(config, options, scored);
 	} catch (error) {
 		console.error("Failed to sync libraries:", error);
 	}
@@ -478,6 +513,7 @@ async function dropStaleEntries(
 async function purgeMediaUnits(
 	config: AppConfig,
 	options: RunOptions = DEFAULT_RUN_OPTIONS,
+	preScored?: ScoredMediaUnit[],
 ): Promise<void> {
 	if (!config.tautulli) {
 		logInfo(
@@ -500,31 +536,36 @@ async function purgeMediaUnits(
 		? new RadarrClient(config.radarr, verboseLogger)
 		: null;
 
-	console.log("\nSyncing libraries via Tautulli (read-only)...");
-	const syncResult = await syncMediaUnits(config, {
-		verbose: options.verbose,
-	});
-	if (!syncResult.units.length) {
-		console.log("No media items were discovered; nothing to delete.");
-		return;
-	}
-
-	const filteredUnits = applyBlocklist(
-		syncResult.units,
-		config.blockedTitles,
-		(message) => console.log(message),
-	);
-	if (!filteredUnits.length) {
-		console.log(
-			"All discovered items were blocked by your ignore list; nothing to delete.",
+	let scoredUnits: ScoredMediaUnit[];
+	if (preScored && preScored.length) {
+		console.log("\nReusing latest sync results for deletion...");
+		scoredUnits = preScored;
+	} else {
+		console.log("\nSyncing libraries via Tautulli...");
+		const syncResult = await syncMediaUnits(config, {
+			verbose: options.verbose,
+		});
+		if (!syncResult.units.length) {
+			console.log("No media items were discovered; nothing to delete.");
+			return;
+		}
+		const filteredUnits = applyBlocklist(
+			syncResult.units,
+			config.blockedTitles,
+			(message) => console.log(message),
 		);
-		return;
+		if (!filteredUnits.length) {
+			console.log(
+				"All discovered items were blocked by your ignore list; nothing to delete.",
+			);
+			return;
+		}
+		scoredUnits = scoreMediaItems(filteredUnits, {
+			weights: config.weights,
+		});
 	}
 
-	const scored = scoreMediaItems(filteredUnits, {
-		weights: config.weights,
-	});
-	const selectableUnits = scored.slice(0, MAX_PURGE_CHOICES);
+	const selectableUnits = scoredUnits.slice(0, MAX_PURGE_CHOICES);
 	const choices = selectableUnits.map((unit, index) => ({
 		name: formatDeletionChoiceLabel(unit, index + 1),
 		value: unit.id,
