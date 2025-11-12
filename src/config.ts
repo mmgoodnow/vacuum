@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import inquirer from "inquirer";
 import { defaultWeights } from "./scoring.ts";
-import type { AppConfig } from "./types.ts";
+import type { AppConfig, ArrConfig } from "./types.ts";
 
 const CONFIG_DIR =
 	process.env.VACUUM_CONFIG_DIR ?? path.join(os.homedir(), ".config", "vacuum");
@@ -79,6 +79,9 @@ async function promptForInitialConfig(): Promise<AppConfig> {
 		},
 	]);
 
+	const sonarr = await promptForArrIntegration("Sonarr");
+	const radarr = await promptForArrIntegration("Radarr");
+
 	const config = normalizeConfig({
 		tautulli:
 			answers.tautulliUrl && answers.tautulliApiKey
@@ -87,6 +90,8 @@ async function promptForInitialConfig(): Promise<AppConfig> {
 						apiKey: answers.tautulliApiKey,
 					}
 				: null,
+		sonarr,
+		radarr,
 		libraryPaths: answers.libraryPaths,
 		weights: defaultWeights,
 		cachePath: DEFAULT_CACHE_PATH,
@@ -96,12 +101,58 @@ async function promptForInitialConfig(): Promise<AppConfig> {
 	return config;
 }
 
+async function promptForArrIntegration(kind: "Sonarr" | "Radarr"): Promise<ArrConfig | null> {
+	const { enable } = await inquirer.prompt<{ enable: boolean }>([
+		{
+			type: "confirm",
+			name: "enable",
+			message: `Configure ${kind} integration now?`,
+			default: false,
+		},
+	]);
+
+	if (!enable) {
+		return null;
+	}
+
+	const answers = await inquirer.prompt<{
+		baseUrl: string;
+		apiKey: string;
+	}>([
+		{
+			type: "input",
+			name: "baseUrl",
+			message: `${kind} base URL`,
+			filter: (value: string) => value.trim(),
+		},
+		{
+			type: "password",
+			name: "apiKey",
+			message: `${kind} API key`,
+			mask: "*",
+			filter: (value: string) => value.trim(),
+		},
+	]);
+
+	if (!answers.baseUrl || !answers.apiKey) {
+		console.warn(`${kind} settings incomplete, skipping integration.`);
+		return null;
+	}
+
+	return {
+		baseUrl: answers.baseUrl,
+		apiKey: answers.apiKey,
+	};
+}
+
 function normalizeConfig(partial: Partial<AppConfig>): AppConfig {
 	const weights = partial.weights ?? { ...defaultWeights };
 	const libraryPaths = partial.libraryPaths ?? [];
 
 	return {
 		tautulli: partial.tautulli ?? null,
+		sonarr: partial.sonarr ?? null,
+		radarr: partial.radarr ?? null,
 		libraryPaths,
 		weights: { ...weights },
 		cachePath: partial.cachePath ?? DEFAULT_CACHE_PATH,

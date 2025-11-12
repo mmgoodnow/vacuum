@@ -48,6 +48,7 @@ export class EpisodeFetcher {
 				logFn?.(
 					`[TV] Cache hit for "${show.title}" (${context.showIndex}/${context.totalShows})`,
 				);
+				await this.populatePlayStats(showKey, cached, logFn);
 				return cached.map((episode) => this.toMediaItem(episode));
 			}
 
@@ -79,14 +80,7 @@ export class EpisodeFetcher {
 				if (episode.media_type !== "episode") {
 					continue;
 				}
-				const filePath = await this.client.getMediaItemFilePath(
-					episode.rating_key,
-				);
-				let playCount = normalizePlayCount(episode.play_count);
-				if (playCount === null) {
-					const lookedUp = await this.client.getEpisodePlayCount(episode.rating_key);
-					playCount = lookedUp ?? null;
-				}
+				const filePath = await this.client.getMediaItemFilePath(episode.rating_key);
 				const cachedEpisode: CachedEpisode = {
 					rating_key: episode.rating_key,
 					media_type: "episode",
@@ -98,7 +92,7 @@ export class EpisodeFetcher {
 					file: filePath ?? episode.file ?? null,
 					added_at: episode.added_at ?? null,
 					last_played: episode.last_played ?? null,
-					play_count: playCount ?? null,
+					play_count: normalizePlayCount(episode.play_count),
 					media_index: episode.media_index ?? null,
 					season_index: episode.season_index ?? null,
 					section_id: episode.section_id,
@@ -109,6 +103,7 @@ export class EpisodeFetcher {
 			}
 		}
 
+			await this.populatePlayStats(showKey, episodes, logFn);
 			this.cache.save(showKey, showUpdatedAt, episodes);
 			logFn?.(
 				`[TV] Completed "${show.title}" — cached ${episodes.length} episode(s).`,
@@ -131,6 +126,40 @@ export class EpisodeFetcher {
 			section_id: episode.section_id,
 			section_name: episode.section_name,
 		};
+	}
+
+	private async populatePlayStats(
+		showKey: string,
+		episodes: CachedEpisode[],
+		logFn?: (message: string) => void,
+	): Promise<void> {
+		if (!episodes.length) {
+			return;
+		}
+
+		try {
+			const history = await this.client.getShowEpisodeHistory(showKey);
+			for (const episode of episodes) {
+				const stats = history.get(episode.rating_key);
+				if (stats) {
+					episode.play_count = stats.playCount;
+					if (stats.lastPlayed) {
+						episode.last_played = stats.lastPlayed;
+					}
+				} else {
+					episode.play_count = normalizePlayCount(episode.play_count) ?? 0;
+				}
+			}
+		} catch (error) {
+			logFn?.(
+				`[TV] Failed to refresh play stats for show ${showKey}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			for (const episode of episodes) {
+				episode.play_count = normalizePlayCount(episode.play_count) ?? 0;
+			}
+		}
 	}
 }
 

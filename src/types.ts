@@ -3,8 +3,15 @@ export interface TautulliConfig {
 	apiKey: string;
 }
 
+export interface ArrConfig {
+	baseUrl: string;
+	apiKey: string;
+}
+
 export interface AppConfig {
 	tautulli: TautulliConfig | null;
+	sonarr: ArrConfig | null;
+	radarr: ArrConfig | null;
 	libraryPaths: string[];
 	weights: WeightConfig;
 	cachePath: string;

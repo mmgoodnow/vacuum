@@ -51,7 +51,44 @@ export async function syncMediaUnits(
 		options.verbose ? (message) => console.error(message) : undefined,
 	);
 	const episodeCache = new EpisodeCache(config.cachePath);
-	const targetShowKey = options.showRatingKey ?? null;
+	const requestedShowKey = options.showRatingKey ?? null;
+	let targetShowKey = requestedShowKey ?? null;
+	let targetShowResolution: ResolvedShowTarget | null = null;
+	if (targetShowKey) {
+		targetShowResolution = await resolveShowTarget(client, targetShowKey);
+		if (!targetShowResolution) {
+			console.error(
+				`[TV] Rating key ${targetShowKey} could not be resolved to a TV show or season.`,
+			);
+			return {
+				units: [],
+				sources: [],
+				skippedDueToPath: 0,
+				skippedMissingFile: 0,
+			};
+		}
+
+		if (targetShowResolution.showRatingKey !== targetShowKey) {
+			const title =
+				targetShowResolution.showTitle ?? targetShowResolution.showRatingKey;
+			console.error(
+				`[TV] Rating key ${targetShowKey} maps to show "${title}" (${targetShowResolution.showRatingKey}).`,
+			);
+		} else {
+			const title =
+				targetShowResolution.showTitle ?? targetShowResolution.showRatingKey;
+			console.error(
+				`[TV] Filtering to show "${title}" (${targetShowResolution.showRatingKey}).`,
+			);
+		}
+		if (targetShowResolution.libraryName) {
+			console.error(
+				`[TV] Restricting sync to library "${targetShowResolution.libraryName}" (${targetShowResolution.libraryId ?? "unknown id"}).`,
+			);
+		}
+
+		targetShowKey = targetShowResolution.showRatingKey;
+	}
 	let processedTargetShow = false;
 
 	const episodeFetcher = new EpisodeFetcher(
@@ -68,6 +105,8 @@ export async function syncMediaUnits(
 		options.libraryFilterIds && options.libraryFilterIds.length > 0
 			? new Set(options.libraryFilterIds)
 			: null;
+	const targetLibraryId = targetShowResolution?.libraryId ?? null;
+	const normalizedTargetShowKey = targetShowKey ?? null;
 
 	const sources: MediaSource[] = [];
 	let skippedDueToPath = 0;
@@ -125,6 +164,10 @@ export async function syncMediaUnits(
 			continue;
 		}
 
+		if (targetLibraryId && library.section_id !== targetLibraryId) {
+			continue;
+		}
+
 		if (targetShowKey && library.section_type !== "show") {
 			continue;
 		}
@@ -153,19 +196,10 @@ export async function syncMediaUnits(
 		};
 		let metadataResolutionLogs = 0;
 		const itemsToProcess =
-			targetShowKey && library.section_type === "show"
-				? items.filter((item) => {
-						if (item.media_type === "show") {
-							return item.rating_key === targetShowKey;
-						}
-						if (item.media_type === "season") {
-							return item.parent_rating_key === targetShowKey;
-						}
-						return (
-							item.parent_rating_key === targetShowKey ||
-							item.grandparent_rating_key === targetShowKey
-						);
-					})
+			normalizedTargetShowKey && library.section_type === "show"
+				? items.filter((item) =>
+						doesItemMatchShow(item, normalizedTargetShowKey),
+					)
 				: items;
 		metadataProgress.setExpectedTotal(itemsToProcess.length || undefined);
 		if (!itemsToProcess.length) {
@@ -288,6 +322,9 @@ export async function syncMediaUnits(
 				label: `Processing ${library.section_name}`,
 			});
 			showProgress.setExpectedTotal(totalShows);
+			metadataProgress.setCarriageReturnEnabled(false);
+		} else {
+			metadataProgress.setCarriageReturnEnabled(true);
 		}
 
 		for (const item of itemsToProcess) {
@@ -318,6 +355,7 @@ export async function syncMediaUnits(
 		}
 
 		metadataProgress.end();
+		metadataProgress.setCarriageReturnEnabled(true);
 		showProgress?.end();
 
 		libraryStats.push(stats);
@@ -490,4 +528,92 @@ function fromUnixSeconds(value: number | null): Date | null {
 		return null;
 	}
 	return new Date(value * 1000);
+}
+
+interface ResolvedShowTarget {
+	showRatingKey: string;
+	showTitle: string | null;
+	libraryId: number | null;
+	libraryName: string | null;
+}
+
+async function resolveShowTarget(
+	client: TautulliClient,
+	ratingKey: string,
+): Promise<ResolvedShowTarget | null> {
+	const metadata = await client.getMetadataSummary(ratingKey);
+	if (!metadata) {
+		return null;
+	}
+	const mediaType = (metadata.media_type ?? "").toLowerCase();
+	if (!mediaType) {
+		return null;
+	}
+
+	let showRatingKey: string | null = null;
+	let showTitle: string | null = null;
+
+	if (mediaType === "show") {
+		showRatingKey = metadata.rating_key;
+		showTitle = metadata.title ?? null;
+	} else if (mediaType === "season") {
+		showRatingKey = metadata.parent_rating_key ?? null;
+		showTitle = metadata.parent_title ?? metadata.title ?? null;
+	} else if (mediaType === "episode") {
+		showRatingKey =
+			metadata.grandparent_rating_key ?? metadata.parent_rating_key ?? null;
+		showTitle =
+			metadata.grandparent_title ??
+			metadata.parent_title ??
+			metadata.title ??
+			null;
+	} else {
+		return null;
+	}
+
+	if (!showRatingKey) {
+		return null;
+	}
+
+	const libraryIdValue = metadata.section_id;
+	const normalizedLibraryId =
+		typeof libraryIdValue === "number"
+			? libraryIdValue
+			: libraryIdValue !== null && libraryIdValue !== undefined
+				? Number(libraryIdValue)
+				: null;
+
+	return {
+		showRatingKey,
+		showTitle,
+		libraryId:
+			normalizedLibraryId !== null && Number.isFinite(normalizedLibraryId)
+				? normalizedLibraryId
+				: null,
+		libraryName: metadata.library_name ?? null,
+	};
+}
+
+function doesItemMatchShow(
+	item: TautulliMediaItem,
+	targetKey: string,
+): boolean {
+	const itemKey = normalizeKey(item.rating_key);
+	if (item.media_type === "show") {
+		return itemKey === targetKey;
+	}
+	const parentKey = normalizeKey(item.parent_rating_key);
+	const grandparentKey = normalizeKey(item.grandparent_rating_key);
+	if (item.media_type === "season") {
+		return parentKey === targetKey || itemKey === targetKey;
+	}
+	return parentKey === targetKey || grandparentKey === targetKey;
+}
+
+function normalizeKey(value: string | null | undefined): string | null {
+	if (value === null || value === undefined) {
+		return null;
+	}
+	const str = String(value);
+	return str.length ? str : null;
 }

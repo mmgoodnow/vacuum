@@ -3,12 +3,14 @@ import process from "node:process";
 export interface ProgressReporterOptions {
 	label: string;
 	stream?: NodeJS.WriteStream;
+	useCarriageReturn?: boolean;
 }
 
 export class ProgressReporter {
 	private readonly stream: NodeJS.WriteStream;
-	private readonly useCarriageReturn: boolean;
 	private readonly label: string;
+	private readonly carriageReturnSupported: boolean;
+	private useCarriageReturn: boolean;
 	private totalStarted = 0;
 	private completed = 0;
 	private expectedTotal: number | undefined;
@@ -16,7 +18,9 @@ export class ProgressReporter {
 
 	constructor(options: ProgressReporterOptions) {
 		this.stream = options.stream ?? process.stderr;
-		this.useCarriageReturn = Boolean(this.stream.isTTY);
+		this.carriageReturnSupported = Boolean(this.stream.isTTY);
+		this.useCarriageReturn =
+			options.useCarriageReturn ?? this.carriageReturnSupported;
 		this.label = options.label;
 	}
 
@@ -26,6 +30,11 @@ export class ProgressReporter {
 		} else {
 			this.expectedTotal = undefined;
 		}
+	}
+
+	setCarriageReturnEnabled(enabled: boolean): void {
+		this.useCarriageReturn =
+			enabled && this.carriageReturnSupported && Boolean(this.stream.isTTY);
 	}
 
 	start(text: string): void {
