@@ -226,8 +226,12 @@ export async function syncMediaUnits(
 		}
 
 		const verboseLogging = options.verbose ?? false;
+		const showProgressActive = Boolean(library.section_type === "show");
 		const processItem = async (item: TautulliMediaItem): Promise<void> => {
-			metadataProgress.start(item.title);
+			const trackMetadata = !showProgressActive;
+			if (trackMetadata) {
+				metadataProgress.start(item.title);
+			}
 			try {
 				if (!isSupportedMediaType(item.media_type)) {
 					stats.skippedUnsupported += 1;
@@ -304,7 +308,9 @@ export async function syncMediaUnits(
 				sources.push(source);
 				stats.imported += 1;
 			} finally {
-				metadataProgress.finish(item.title);
+				if (trackMetadata) {
+					metadataProgress.finish(item.title);
+				}
 			}
 		};
 
@@ -354,7 +360,9 @@ export async function syncMediaUnits(
 			await processItem(item);
 		}
 
-		metadataProgress.end();
+		if (!showProgressActive) {
+			metadataProgress.end();
+		}
 		metadataProgress.setCarriageReturnEnabled(true);
 		showProgress?.end();
 
