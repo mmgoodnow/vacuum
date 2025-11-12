@@ -615,33 +615,8 @@ async function purgeMediaUnits(
 		}
 	}
 
-	let applySonarrUpdates = false;
-	if (sonarrTargets.length && sonarrClient) {
-		const { apply } = await promptOrExit<{ apply: boolean }>([
-			{
-				type: "confirm",
-				name: "apply",
-				message:
-					"Also unmonitor the selected season(s) in Sonarr to prevent re-downloads?",
-				default: true,
-			},
-		]);
-		applySonarrUpdates = apply;
-	}
-
-	let applyRadarrUpdates = false;
-	if (radarrTargets.length && radarrClient) {
-		const { apply } = await promptOrExit<{ apply: boolean }>([
-			{
-				type: "confirm",
-				name: "apply",
-				message:
-					"Also unmonitor the selected movie(s) in Radarr to prevent re-downloads?",
-				default: true,
-			},
-		]);
-		applyRadarrUpdates = apply;
-	}
+	const applySonarrUpdates = Boolean(sonarrTargets.length && sonarrClient);
+	const applyRadarrUpdates = Boolean(radarrTargets.length && radarrClient);
 
 	const phraseAnswer = await promptOrExit<{ typedPhrase: string }>(
 		[
