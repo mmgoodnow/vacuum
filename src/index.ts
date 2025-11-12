@@ -361,23 +361,11 @@ async function syncAndRank(
 			console.log("No media items were discovered.");
 			return;
 		}
-		const blockedSet = new Set(
-			config.blockedTitles
-				.map((title) => normalizeTitle(title))
-				.filter((value): value is string => Boolean(value)),
+		const units = applyBlocklist(
+			result.units,
+			config.blockedTitles,
+			(message) => logInfo(message, options),
 		);
-		let units = result.units;
-		if (blockedSet.size > 0) {
-			const filtered = units.filter((unit) => !isUnitBlocked(unit, blockedSet));
-			const blockedCount = units.length - filtered.length;
-			if (blockedCount > 0) {
-				logInfo(
-					`Filtered ${blockedCount} item(s) via blocklist (${config.blockedTitles.join(", ")})`,
-					options,
-				);
-			}
-			units = filtered;
-		}
 		if (units.length === 0) {
 			logInfo(
 				"All discovered items were blocked by your title filter.",
@@ -521,7 +509,19 @@ async function purgeMediaUnits(
 		return;
 	}
 
-	const scored = scoreMediaItems(syncResult.units, {
+	const filteredUnits = applyBlocklist(
+		syncResult.units,
+		config.blockedTitles,
+		(message) => console.log(message),
+	);
+	if (!filteredUnits.length) {
+		console.log(
+			"All discovered items were blocked by your ignore list; nothing to delete.",
+		);
+		return;
+	}
+
+	const scored = scoreMediaItems(filteredUnits, {
 		weights: config.weights,
 	});
 	const selectableUnits = scored.slice(0, MAX_PURGE_CHOICES);
@@ -771,6 +771,34 @@ function collectUnitTitles(unit: MediaUnit): string[] {
 		}
 	}
 	return Array.from(titles);
+}
+
+function applyBlocklist<T extends MediaUnit>(
+	units: T[],
+	blockedTitles: string[],
+	log?: (message: string) => void,
+): T[] {
+	if (!blockedTitles.length) {
+		return units;
+	}
+	const normalizedBlocked = new Set(
+		blockedTitles
+			.map((title) => normalizeTitle(title))
+			.filter((value): value is string => Boolean(value)),
+	);
+	if (!normalizedBlocked.size) {
+		return units;
+	}
+	const filtered = units.filter(
+		(unit) => !isUnitBlocked(unit, normalizedBlocked),
+	);
+	const blockedCount = units.length - filtered.length;
+	if (blockedCount > 0 && log) {
+		log(
+			`Filtered ${blockedCount} item(s) via blocklist (${blockedTitles.join(", ")})`,
+		);
+	}
+	return filtered;
 }
 
 interface SonarrTarget {
