@@ -13,6 +13,7 @@ export interface AppConfig {
 	sonarr: ArrConfig | null;
 	radarr: ArrConfig | null;
 	libraryPaths: string[];
+	blockedTitles: string[];
 	weights: WeightConfig;
 	cachePath: string;
 }

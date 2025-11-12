@@ -18,6 +18,7 @@ import {
 import type {
 	AppConfig,
 	ArrConfig,
+	MediaUnit,
 	ScoredMediaUnit,
 	WeightConfig,
 } from "./types.ts";
@@ -351,8 +352,32 @@ async function syncAndRank(
 			console.log("No media items were discovered.");
 			return;
 		}
+		const blockedSet = new Set(
+			config.blockedTitles
+				.map((title) => normalizeTitle(title))
+				.filter((value): value is string => Boolean(value)),
+		);
+		let units = result.units;
+		if (blockedSet.size > 0) {
+			const filtered = units.filter((unit) => !isUnitBlocked(unit, blockedSet));
+			const blockedCount = units.length - filtered.length;
+			if (blockedCount > 0) {
+				logInfo(
+					`Filtered ${blockedCount} item(s) via blocklist (${config.blockedTitles.join(", ")})`,
+					options,
+				);
+			}
+			units = filtered;
+		}
+		if (units.length === 0) {
+			logInfo(
+				"All discovered items were blocked by your title filter.",
+				options,
+			);
+			return;
+		}
 
-		const scored = scoreMediaItems(result.units, {
+		const scored = scoreMediaItems(units, {
 			weights: config.weights,
 		});
 
@@ -721,6 +746,49 @@ function formatUnitTitle(unit: ScoredMediaUnit): string {
 	return unit.title;
 }
 
+function normalizeTitle(value: string | null | undefined): string | null {
+	if (!value) {
+		return null;
+	}
+	const normalized = value.trim().toLowerCase();
+	return normalized.length ? normalized : null;
+}
+
+function isUnitBlocked(unit: MediaUnit, blocked: Set<string>): boolean {
+	if (!blocked.size) {
+		return false;
+	}
+	for (const title of collectUnitTitles(unit)) {
+		const normalized = normalizeTitle(title);
+		if (normalized && blocked.has(normalized)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function collectUnitTitles(unit: MediaUnit): string[] {
+	const titles = new Set<string>();
+	if (unit.title) {
+		titles.add(unit.title);
+	}
+	if (unit.parentTitle) {
+		titles.add(unit.parentTitle);
+	}
+	for (const source of unit.sourceItems) {
+		if (source.title) {
+			titles.add(source.title);
+		}
+		if (source.showTitle) {
+			titles.add(source.showTitle);
+		}
+		if (source.seasonTitle) {
+			titles.add(source.seasonTitle);
+		}
+	}
+	return Array.from(titles);
+}
+
 interface SonarrTarget {
 	showKey: string;
 	showTitle: string;
@@ -966,6 +1034,7 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 		tautulliUrl: string;
 		tautulliApiKey: string;
 		libraryPaths: string[];
+		blockedTitles: string[];
 	}>([
 		{
 			type: "input",
@@ -993,6 +1062,17 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 					.map((part) => part.trim())
 					.filter(Boolean),
 		},
+		{
+			type: "input",
+			name: "blockedTitles",
+			message: "Blocked titles (comma separated)",
+			default: current.blockedTitles.join(", "),
+			filter: (value: string) =>
+				value
+					.split(",")
+					.map((part) => part.trim())
+					.filter(Boolean),
+		},
 	]);
 
 	const sonarr = await promptForArrSettings("Sonarr", current.sonarr);
@@ -1010,6 +1090,7 @@ async function reconfigure(current: AppConfig): Promise<AppConfig> {
 		sonarr,
 		radarr,
 		libraryPaths: [...answers.libraryPaths],
+		blockedTitles: [...answers.blockedTitles],
 	};
 
 	await saveConfig(updatedConfig);
